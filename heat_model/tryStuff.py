@@ -7,7 +7,9 @@ from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import os
-os.chdir('C:/Users/jmmil/workspace/school/475/project')
+
+os.chdir(os.path.dirname(__file__))
+
 # === Load Data ===
 
 def load_dataset(save_dir='heat_trajectory_data'):
