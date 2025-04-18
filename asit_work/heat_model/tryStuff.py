@@ -1,8 +1,8 @@
 import torch
 from torch.utils.data import DataLoader
 # from neuralop.data.datasets.pt_dataset import TensorDataset
-from neuralop.models import FNO
 from torch.utils.data import TensorDataset
+from neuralop.models import FNO
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
@@ -31,12 +31,16 @@ test_loader = DataLoader(test_dataset, batch_size=16)
 # === Define and Train Model ===
 
 model = FNO(n_modes=(20, 20), hidden_channels=64, in_channels=1, out_channels=T)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('mps' if torch.mps.is_available() else 'cpu')
+
 model.to(device)
 
 optimizer = AdamW(model.parameters(), lr=1e-3)
 scheduler = StepLR(optimizer, step_size=25, gamma=0.5)
 criterion = torch.nn.MSELoss()
+
+
 
 n_epochs = 100
 for epoch in range(1, n_epochs + 1):
@@ -44,8 +48,18 @@ for epoch in range(1, n_epochs + 1):
     train_loss = 0.0
     with tqdm(train_loader, desc=f"[Epoch {epoch}] Training") as pbar:
         for batch in pbar:
-            x = batch['x'].to(device)
-            y = batch['y'].to(device)
+
+            # #debug
+            # print(f"(batch[0]).shape: {(batch[0]).shape}")
+            # print(f"(batch[1]).shape: {(batch[1]).shape}")
+            # quit()
+            # #debug
+
+            # x = batch['x'].to(device)
+            # y = batch['y'].to(device)
+
+            x = batch[0].to(device)
+            y = batch[1].to(device)
 
             optimizer.zero_grad()
             y_pred = model(x)
@@ -63,8 +77,10 @@ for epoch in range(1, n_epochs + 1):
     val_loss = 0.0
     with torch.no_grad(), tqdm(val_loader, desc=f"[Epoch {epoch}] Validating") as pbar:
         for batch in pbar:
-            x = batch['x'].to(device)
-            y = batch['y'].to(device)
+            # x = batch['x'].to(device)
+            # y = batch['y'].to(device)
+            x = batch[0].to(device)
+            y = batch[1].to(device)
             y_pred = model(x)
             loss = criterion(y_pred, y)
             val_loss += loss.item()
@@ -100,8 +116,10 @@ def plot_and_save_trajectory(x, y_true, y_pred, sample_idx=0, save_dir="figures"
 model.eval()
 with torch.no_grad():
     for batch in test_loader:
-        x = batch['x'].to(device)
-        y_true = batch['y'].to(device)
+        # x = batch['x'].to(device)
+        # y_true = batch['y'].to(device)
+        x = batch[0].to(device)
+        y_true = batch[1].to(device)
         y_pred = model(x)
         break
 
