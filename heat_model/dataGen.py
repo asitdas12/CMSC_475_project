@@ -3,7 +3,6 @@ import torch
 import os
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
-import os
 
 os.chdir(os.path.dirname(__file__))
 
@@ -59,10 +58,10 @@ def generate_initial_condition(nx, ny, mode='mixed'):
 
 # === Generate a trajectory of solutions ===
 
-def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, mode='mixed'):
+def generate_trajectory(nx, ny, dx, dy, dt, alpha, t_interval, n_frames, mode='mixed'):
     u = generate_initial_condition(nx, ny, mode=mode)
     traj = [u.copy()]
-    steps_per_frame = nt // (n_frames - 1)
+    steps_per_frame = t_interval // (n_frames - 1)
     # add a small random constant to simulate some heat already in the system
     # u += np.random.rand(nx, ny) + 1
     
@@ -102,14 +101,14 @@ nx, ny = 64, 64
 dx = 1.0 / (nx - 1)
 dy = 1.0 / (ny - 1)
 dt = 0.01
-nt = 1000
+t_interval = 1000
 T = 20
 
 alpha = 0.001
 
 u0_all, traj_all = [], []
 for _ in tqdm(range(N), desc="Generating dataset"):
-    u0, traj = generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, T, mode='mixed')
+    u0, traj = generate_trajectory(nx, ny, dx, dy, dt, alpha, t_interval, T, mode='mixed')
     u0_all.append(u0)
     traj_all.append(traj)
 
