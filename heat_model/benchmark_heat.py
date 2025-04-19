@@ -77,7 +77,7 @@ def gen_dataset(T: int, n_samples: int):
         uT  — shape (N, T, H, W)
     """
     u0_all, traj_all = [], []
-    for _ in range(n_samples):
+    for _ in tqdm(range(n_samples), desc=f"Generating dataset for {n_samples} samples"):
         u0, traj = generate_trajectory(
             DEF_NX, DEF_NY, DEF_DX, DEF_DY, DEF_DT, DEF_ALPHA,
             DEF_T_INTERVAL, T, mode="mixed"

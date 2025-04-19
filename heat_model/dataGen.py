@@ -94,15 +94,14 @@ def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, mode='mixed'):
 
 # === Generate and save full dataset ===
 
-def save_dataset(u0_tensor, uT_tensor, T, n_frames, save_dir='heat_trajectory_data'):
+def save_dataset(u0_tensor, uT_tensor, save_dir='heat_trajectory_data'):
     os.makedirs(save_dir, exist_ok=True)
-    torch.save(u0_tensor, os.path.join(save_dir, f'u0_{T}_{n_frames}.pt'))
-    torch.save(uT_tensor, os.path.join(save_dir, f'uT_{T}_{n_frames}.pt'))
-    print(f"Saved tensors to '{save_dir}/u0_{T}_{n_frames}.pt' and 'uT_{T}_{n_frames}.pt'")
+    torch.save(u0_tensor, os.path.join(save_dir, f'u0{u0_tensor.shape}.pt'))
+    torch.save(uT_tensor, os.path.join(save_dir, f'uT{uT_tensor.shape}.pt'))
+    print(f"Saved tensors to '{save_dir}/u0{u0_tensor.shape}.pt' and 'uT{uT_tensor.shape}.pt'")
 
-
+# === Parameters ===
 if __name__ == "__main__":
-    # === Parameters ===
     N = 1000
     nx, ny = 64, 64
     dx = 1.0 / (nx - 1)
