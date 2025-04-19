@@ -40,6 +40,63 @@ def plot_and_save_trajectory(x, y_true, y_pred, sample_idx=0, save_dir="figures"
     plt.close()
     print(f"Saved: {path}")
 
+
+import matplotlib.pyplot as plt
+from matplotlib import animation
+
+def create_animation(y_pred, y_true, sample_idx=0, save_path="animation.gif", save_path2="animationT.gif"):
+    T = y_pred.shape[1]
+
+    fig, ax = plt.subplots(figsize=(4, 4))
+    im = ax.imshow(y_pred[sample_idx, 0].cpu(), cmap="inferno")
+    ax.axis('off')
+
+    def update(t):
+        im.set_array(y_pred[sample_idx, t].cpu())
+        return [im]
+
+    anim = animation.FuncAnimation(fig, update, frames=T, interval=200)
+    anim.save(save_path, writer='pillow')  # Use 'ffmpeg' for .mp4
+    plt.close()
+    print(f"Saved animation to {save_path}")
+
+    T = y_true.shape[1]
+
+    fig, ax = plt.subplots(figsize=(4, 4))
+    im = ax.imshow(y_true[sample_idx, 0].cpu(), cmap="inferno")
+    ax.axis('off')
+
+    def update(t):
+        im.set_array(y_true[sample_idx, t].cpu())
+        return [im]
+
+    anim = animation.FuncAnimation(fig, update, frames=T, interval=200)
+    anim.save(save_path2, writer='pillow')  # Use 'ffmpeg' for .mp4
+    plt.close()
+    print(f"Saved animation to {save_path2}")
+
+
+def animate_comparison(x, y_true, y_pred, sample_idx=0, save_path="compare.gif"):
+    T = y_true.shape[1]
+    fig, axs = plt.subplots(3, 1, figsize=(4, 12))
+    ims = []
+
+    for t in range(T):
+        ims.append([
+            axs[0].imshow(x[sample_idx, 0].cpu(), cmap='inferno', animated=True),
+            axs[1].imshow(y_true[sample_idx, t].cpu(), cmap='inferno', animated=True),
+            axs[2].imshow(y_pred[sample_idx, t].cpu(), cmap='inferno', animated=True)
+        ])
+        for ax in axs:
+            ax.axis('off')
+
+    ani = animation.ArtistAnimation(fig, ims, interval=200, blit=True)
+    ani.save(save_path, writer='pillow')
+    plt.close()
+    print(f"Saved comparison animation: {save_path}")
+
+
+
 # === Predict and Save Figures ===
 def main():
      u0_tensor, uT_tensor = load_dataset()
@@ -59,57 +116,25 @@ def main():
      test_loader = DataLoader(test_dataset, batch_size=32, num_workers=0)
 
      model = FNO(n_modes=(20, 20), hidden_channels=64, in_channels=1, out_channels=T).to(torch.float32)
-     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-     device = torch.device('mps' if torch.mps.is_available() else 'cpu')
+     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
      model = model.to(torch.float32)
      model.to(device, dtype=torch.float32)
-
-     # #debug
-     # # Dummy input [batch_size, channels, height, width]
-     # x = torch.randn(1, 1, 64, 64, device=device, dtype=torch.float32)
-
-     # model.eval()
-     # with torch.no_grad():
-     #      y = model(x)
-     #      print("Output stats:", y.mean().item(), y.std().item(), y.min().item(), y.max().item())
-     # quit()
-     # #debug
 
      optimizer = AdamW(model.parameters(), lr=1e-3)
      scheduler = StepLR(optimizer, step_size=25, gamma=0.5)
      criterion = torch.nn.MSELoss()
 
-     n_epochs = 100
+     n_epochs = 3
      for epoch in tqdm(range(1, n_epochs + 1), desc = "Training"):
           model.train()
           train_loss = 0.0
           with tqdm(train_loader, desc=f"[Epoch {epoch}] Training", leave=False, position=1) as pbar:
                for batch in pbar:
-                    # debug
-                    # print(f"batch: {batch}")
-                    # print(f"len(batch): {len(batch)}")
-                    # print(f"batch[0].shape: {batch[0].shape}")
-                    # print(f"batch[1].shape: {batch[1].shape}")
-                    # print(f"batch[0]: {batch[0]}")
-                    # print(f"batch[1]: {batch[1]}")
-                    # quit()
-                    # debug
-
-
-                    # x = batch['x'].to(device)
-                    # y = batch['y'].to(device)
                     x = batch[0].to(device, dtype=torch.float32)
                     y = batch[1].to(device, dtype=torch.float32)
 
                     optimizer.zero_grad()
                     y_pred = model(x)
-
-                    # #debug
-                    print(f"y_pred.shape: {y_pred.shape}")
-                    # print("Pred:", y_pred)
-                    # print(y_pred.mean(), y_pred.std(), y_pred.min(), y_pred.max())
-                    quit()
-                    # #debug
 
                     loss = criterion(y_pred, y)
                     loss.backward()
@@ -125,17 +150,9 @@ def main():
      val_loss = 0.0
      with torch.no_grad(), tqdm(val_loader, desc=f"[Epoch {epoch}] Validating") as pbar:
           for batch in pbar:
-               # x = batch['x'].to(device)
-               # y = batch['y'].to(device)
                x = batch[0].to(device, dtype=torch.float32)
                y = batch[1].to(device, dtype=torch.float32)
                y_pred = model(x)
-
-               # #debug
-               # print("Pred:", y_pred)
-               # print("STATS:", y_pred.mean(), y_pred.std(), y_pred.min(), y_pred.max())
-               # # quit()
-               # #debug
 
                loss = criterion(y_pred, y)
                val_loss += loss.item()
@@ -154,16 +171,16 @@ def main():
                y_true = batch[1].to(device, dtype=torch.float32)
                y_pred = model(x)
 
-               # #debug
-               # print("Pred:", y_pred)
-               # print("STATS:", y_pred.mean(), y_pred.std(), y_pred.min(), y_pred.max())
-               # # quit()
-               # #debug
-
                break
 
      for i in range(5):
           plot_and_save_trajectory(x, y_true, y_pred, sample_idx=i, save_dir="figures", prefix="epoch_final")
+
+     create_animation(y_pred=y_pred, y_true=y_true)
+
+     animate_comparison(x=x, y_true=y_true, y_pred=y_pred)
+
+
 
 
 if __name__ == "__main__":
