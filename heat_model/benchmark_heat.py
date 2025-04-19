@@ -1,162 +1,174 @@
-# benchmark_heat.py  — extended benchmarking & visualization for 2-D Heat-Equation
+# benchmark_heat.py — extended benchmarking & visualization for 2-D Heat-Equation
 """
-This script now **does four things**
+This script now **benchmarks**, **plots**, and **animates** Heat-equation data while
+optionally showcasing **FNO predictions with per-frame loss** alongside ground
+truth.  Highlights:
 
-1. **Benchmark** dataset-generation time *versus* FNO inference time for a grid of
-   stored-time-step counts `T` (5 → 200).
-2. **Plot** the log-scaled timing curves **and** mark the first crossover point
-   where FNO inference becomes more expensive than brute-force generation.
-3. **Visualize** a *single* trajectory for **every** `T` in `T_VALUES`:
-   it stores each field snapshot as a PNG **and** stitches them into a GIF so you
-   can watch heat diffusion evolve.  Output lives in `animations/`.
-4. **Save** an (untrained) FNO model *per T* to `models/` so you can reload and
-   fine-tune it later if needed.
+1. **Benchmark** dataset-generation vs. FNO inference for stored-step counts
+   `T = 5 … 200`.
+2. **Plot** both timing curves (log-scale) and indicate the first crossover.
+3. Animation for every `T`: each frame shows ground truth and
+   prediction side-by-side, with the MSE loss in the title.
+4. Model handling
+    If a trained weight file `MODEL_DIR/fno_T{T}.pth` exists it is loaded.
+    Otherwise an untrained stub is created and saved (use `--skip-model` to
+    disable).
 
-The extra features are enabled by default and are inexpensive because only one
-trajectory per `T` is rendered.
+CLI switches:
 
-Run:
-    python benchmark_heat.py              # all default options
-    python benchmark_heat.py --no-gpu     # force CPU timing
-    python benchmark_heat.py --skip-anim  # only timings/plot, no GIFs
+```bash
+python benchmark_heat.py          # full run: timings + GIFs + model stubs
+python benchmark_heat.py --skip-anim            # no GIFs
+python benchmark_heat.py --skip-model           # no model saving
+python benchmark_heat.py --model-dir trained/   # directory with trained .pth
+python benchmark_heat.py --no-gpu               # CPU only
+```
 
-The script is self-contained; the only new run-time dependency is **imageio**
-(`pip install imageio`).
+> **New dependency**: `imageio` (`pip install imageio`).
 """
 
 from __future__ import annotations
 
-import argparse, os, math, time, io
+import argparse, io, math, time
 from pathlib import Path
 
+import imageio.v2 as imageio          # ⇐ new (GIF writing)
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import torch
-import imageio.v2 as imageio               # ⬅ requirement: pip install imageio
 
 from dataGen import generate_trajectory
-from neuralop.models import FNO            # pip install neuralop
+from neuralop.models import FNO       # pip install neuralop
 
-# ---------- hyper-parameters ----------
-T_VALUES   = list(range(5, 205, 5))        # 5,10,…,200  (inclusive)
-N_SAMPLES  = 128                           # trajectories per T for benchmarks
-NX = NY   = 64                             # grid (must match dataGen.py)
+# ──────────────────────────────────────────────────────────────────────────────
+# Hyper-parameters
+# ──────────────────────────────────────────────────────────────────────────────
+T_VALUES   = list(range(5, 205, 5))   # 5,10,…,200 (inclusive)
+N_SAMPLES  = 128                      # trajectories per T for benchmarks
+NX = NY   = 64                       # grid (must match dataGen.py)
 DX = DY   = 1.0 / (NX - 1)
 DT         = 0.01
-T_INTERVAL = 1000                          # physical horizon (fixed)
-ALPHA      = 1e-3                          # diffusivity
-BATCH_SIZE = 32                            # FNO inference mini-batches
-WARMUP     = 3                             # GPU warm-up forward passes
-# --------------------------------------
+T_INTERVAL = 1000                     # physical horizon (fixed)
+ALPHA      = 1e-3                     # diffusivity
+BATCH_SIZE = 32                       # FNO inference mini-batches
+WARMUP     = 3                        # GPU warm-up forward passes
 
-THIS_DIR = Path(__file__).resolve().parent
-PLOT_PATH = THIS_DIR / "benchmark_heat_dataset_vs_inference.png"
-ANIM_DIR  = THIS_DIR / "animations"
-MODEL_DIR = THIS_DIR / "models"
+THIS_DIR   = Path(__file__).resolve().parent
+PLOT_PATH  = THIS_DIR / "benchmark_heat_dataset_vs_inference.png"
+ANIM_DIR   = THIS_DIR / "animations"
+MODEL_DIR  = THIS_DIR / "models"      # default for stubs / trained nets
 ANIM_DIR.mkdir(exist_ok=True)
 MODEL_DIR.mkdir(exist_ok=True)
 
-# -----------------------------------------------------------------------------
-# Timing helpers
-# -----------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# Utility helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
-def _cuda_sync_if(device: torch.device):
+def _sync(device: torch.device):
     if device.type == "cuda":
         torch.cuda.synchronize()
 
 def time_dataset_gen(T: int) -> float:
-    """Return wall-clock seconds to generate *N_SAMPLES* trajectories of length *T*."""
+    """Return seconds to generate *N_SAMPLES* trajectories of length *T*."""
     start = time.perf_counter()
     for _ in range(N_SAMPLES):
         generate_trajectory(NX, NY, DX, DY, DT, ALPHA, T_INTERVAL, T, mode="mixed")
-    _cuda_sync_if(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    _sync(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
     return time.perf_counter() - start
 
+def build_fno(T: int, device: torch.device) -> FNO:
+    return FNO(n_modes=(20, 20), hidden_channels=64,
+               in_channels=1, out_channels=T).to(device)
+
+def load_or_stub_fno(T: int, device: torch.device, model_dir: Path, save_stub: bool) -> FNO:
+    """Load trained FNO if present else create & optionally save stub."""
+    path = model_dir / f"fno_T{T}.pth"
+    model = build_fno(T, device)
+    if path.exists():
+        model.load_state_dict(torch.load(path, map_location=device, weights_only=False))
+        print(f"🎯  Loaded trained model  ←  {path.relative_to(THIS_DIR)}")
+    else:
+        if save_stub:
+            torch.save(model.state_dict(), path)
+            print(f"💾  Saved stub model     →  {path.relative_to(THIS_DIR)}")
+        else:
+            print("⚠️   Using untrained stub (not saved)")
+    model.eval()
+    return model
 
 def time_inference(T: int, device: torch.device) -> float:
-    """Return seconds for *N_SAMPLES* forward passes through a size-compatible FNO."""
-    model = FNO(n_modes=(20, 20), hidden_channels=64,
-                in_channels=1, out_channels=T).to(device).eval()
-
-    # synthetic batch once in RAM/VRAM (re-used)
+    """Seconds for *N_SAMPLES* forward passes through an FNO of shape T."""
+    model = build_fno(T, device).eval()
     x = torch.randn(BATCH_SIZE, 1, NX, NY, device=device)
-
-    def _now() -> float:
-        _cuda_sync_if(device)
-        return time.perf_counter()
-
-    # warm-up (important on GPUs so the first call isn't dominated by JIT / alloc)
+    def now(): _sync(device); return time.perf_counter()
     with torch.no_grad():
         for _ in range(WARMUP):
-            _ = model(x)
-
-    n_iter = math.ceil(N_SAMPLES / BATCH_SIZE)
-    start = _now()
+            model(x)
+    iters = math.ceil(N_SAMPLES / BATCH_SIZE)
+    start = now()
     with torch.no_grad():
-        for _ in range(n_iter):
-            _ = model(x)
-    return _now() - start
+        for _ in range(iters):
+            model(x)
+    return now() - start
 
-# -----------------------------------------------------------------------------
-# GIF creation helpers (ground-truth trajectories only — no FNO prediction)
-# -----------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# Animation helper
+# ──────────────────────────────────────────────────────────────────────────────
 
-def make_animation(T: int, out_dir: Path = ANIM_DIR, cmap: str = "inferno") -> None:
-    """Generate **one** trajectory of length T, dump PNGs, and create a GIF."""
-    traj0, traj = generate_trajectory(NX, NY, DX, DY, DT, ALPHA,
-                                      T_INTERVAL, T, mode="mixed")
+def make_animation(T: int, model: FNO, device: torch.device, out_dir: Path = ANIM_DIR,
+                   cmap: str = "inferno") -> None:
+    """Generate one trajectory, predict with `model`, and write a side-by-side GIF."""
+    u0, gt = generate_trajectory(NX, NY, DX, DY, DT, ALPHA, T_INTERVAL, T, mode="mixed")
+
+    # ── model prediction ────────────────────────────────────────────────────
+    with torch.no_grad():
+        x0 = torch.tensor(u0, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
+        pred = model(x0)[0].cpu().numpy()        # (T, nx, ny)
+    gt   = gt                                   # (T, nx, ny) numpy already
+
+    vmin = min(gt.min(), pred.min())
+    vmax = max(gt.max(), pred.max())
+
     frames: list[imageio.core.util.Array] = []
-
-    print(f"🎞  Building animation for T={T} …")
+    print(f"🎞  Building GT vs Pred animation for T={T} …")
     for t in range(T):
-        fig, ax = plt.subplots(figsize=(3,3))
-        im = ax.imshow(traj[t], cmap=cmap, origin="lower")
-        ax.set_title(f"T={T}  |  t={t}")
-        ax.axis("off")
-        fig.tight_layout(pad=0.1)
+        loss = ((pred[t] - gt[t])**2).mean()
 
-        # render figure to RGB array *in-memory* (avoids temp PNG files)
+        fig, axs = plt.subplots(1, 2, figsize=(4.8, 2.4))
+        im0 = axs[0].imshow(gt[t], cmap=cmap, vmin=vmin, vmax=vmax, origin="lower")
+        axs[0].set_title(f"Ground Truth\nt={t}")
+        axs[0].axis("off")
+
+        im1 = axs[1].imshow(pred[t], cmap=cmap, vmin=vmin, vmax=vmax, origin="lower")
+        axs[1].set_title(f"Prediction\nMSE={loss:.2e}")
+        axs[1].axis("off")
+
+        fig.tight_layout(pad=0.1)
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
         buf.seek(0)
         frames.append(imageio.imread(buf))
 
-    gif_path = out_dir / f"heat_trajectory_T{T}.gif"
-    imageio.mimsave(gif_path, frames, fps=12)      # ~12 fps looks smooth enough
+    gif_path = out_dir / f"heat_GT_vs_Pred_T{T}.gif"
+    imageio.mimsave(gif_path, frames, fps=12)
     print(f"   ↳ saved  →  {gif_path.relative_to(THIS_DIR)}  ({T} frames)")
 
-# -----------------------------------------------------------------------------
-# Model persistence helpers
-# -----------------------------------------------------------------------------
-
-def save_fno_stub(T: int, device: torch.device, out_dir: Path = MODEL_DIR) -> Path:
-    """Instantiate a correctly sized FNO(**out_channels=T**) and *save* its weights.
-
-    The network is **untrained** — the goal is merely to preserve the exact
-    architecture that the speed benchmark used.  You can reload and fine-tune
-    on a proper dataset later with `torch.load(.., map_location)`.
-    """
-    model = FNO(n_modes=(20, 20), hidden_channels=64,
-                in_channels=1, out_channels=T).to(device)
-    path = out_dir / f"fno_stub_T{T}.pth"
-    torch.save(model.state_dict(), path)
-    return path
-
-# -----------------------------------------------------------------------------
-# Main entry
-# -----------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark Heat-Eq dataset generation vs FNO inference and make per-T animations.")
-    parser.add_argument("--no-gpu",       action="store_true", help="Force CPU even if CUDA is available")
-    parser.add_argument("--skip-anim",    action="store_true", help="Skip trajectory GIF creation to save time")
-    parser.add_argument("--skip-model",   action="store_true", help="Skip saving stub FNO state_dicts")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="Benchmark Heat-Eq generation vs FNO inference + GT/Pred animations.")
+    ap.add_argument("--no-gpu",      action="store_true", help="Force CPU even if CUDA is available")
+    ap.add_argument("--skip-anim",   action="store_true", help="Skip GIF creation")
+    ap.add_argument("--skip-model",  action="store_true", help="Do not save stub models if none exist")
+    ap.add_argument("--model-dir",   type=Path, default=MODEL_DIR, help="Directory containing trained FNO weights *.pth")
+    args = ap.parse_args()
 
     device = torch.device("cpu" if args.no_gpu or not torch.cuda.is_available() else "cuda")
-    print(f"Running on {device} …\n")
+    print(f"Running on {device}\n")
 
     rows: list[dict[str, float]] = []
     for T in T_VALUES:
@@ -165,21 +177,19 @@ def main():
         t_inf = time_inference(T, device)
         rows.append(dict(T=T, dataset_sec=t_gen, inference_sec=t_inf))
 
-        # optional extras ------------------------------------------------------
-        if not args.skip_model:
-            path = save_fno_stub(T, device)
-            print(f"💾  Saved stub model → {path.relative_to(THIS_DIR)}")
-        if not args.skip_anim:
-            make_animation(T)
+        # handle model (trained or stub)
+        model = load_or_stub_fno(T, device, args.model_dir, save_stub=not args.skip_model)
 
-    # ----------------------------- summary/plot ------------------------------
+        # optional GIF --------------------------------------------------------
+        if not args.skip_anim:
+            make_animation(T, model, device)
+
+    # ── timing plot ──────────────────────────────────────────────────────────
     df = pd.DataFrame(rows)
-    print("\nTiming summary (log-seconds):\n", df.to_string(index=False, formatters={
+    print("\nTiming summary (seconds):\n", df.to_string(index=False, formatters={
         "dataset_sec": "{:.3e}".format, "inference_sec": "{:.3e}".format}))
 
-    # Plot curves -------------------------------------------------------------
     fig, ax = plt.subplots(figsize=(7.5, 4.5))
-
     ax.plot(df.T, df.dataset_sec,  marker="o", label="Dataset generation")
     ax.plot(df.T, df.inference_sec, marker="s", label="FNO inference")
     ax.set_xlabel("Number of stored time steps T")
@@ -188,12 +198,11 @@ def main():
     ax.grid(True, which="both", ls="--", lw=0.5)
     ax.legend()
 
-    # crossover — first T where inference ≥ generation ------------------------
     cross = df[df.inference_sec >= df.dataset_sec].head(1)
     if not cross.empty:
         T_star = int(cross.T.iloc[0])
         ax.axvline(T_star, color="grey", ls=":")
-        ax.text(T_star, ax.get_ylim()[1]*0.45,
+        ax.text(T_star, ax.get_ylim()[1]*0.5,
                 f"crossover ≈ T = {T_star}", rotation=90,
                 ha="right", va="center", fontsize=9,
                 bbox=dict(fc="white", ec="grey", alpha=0.8))
