@@ -114,19 +114,34 @@ def train_fno(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader
               n_epochs: int, device: torch.device, save_dir: Path):
     """Train *model* for *n_epochs* and save loss-curve plot in *save_dir*."""
     criterion  = nn.MSELoss()
-    optimiser  = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    scheduler  = torch.optim.lr_scheduler.StepLR(optimiser, step_size=10, gamma=0.5)
+    optimizer  = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scheduler  = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6
+    )
+
+    warmup_epochs = 15
+    max_lr = 0.001
 
     train_hist, val_hist = [], []
     for epoch in range(1, n_epochs + 1):
+        if epoch < warmup_epochs:
+            lr = max_lr * (epoch + 1) / warmup_epochs
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
+        elif epoch == warmup_epochs:
+            # Switch to cosine annealing after warmup
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs-warmup_epochs, eta_min=1e-6)
+        elif epoch > warmup_epochs:
+            scheduler.step()
+
         # ---- training ----
         model.train();   train_loss = 0.0
         for u0, traj in train_loader:
             u0, traj = u0.to(device), traj.to(device)
-            optimiser.zero_grad()
+            optimizer.zero_grad()
             pred = model(u0)
             loss = criterion(pred, traj)
-            loss.backward();  optimiser.step()
+            loss.backward();  optimizer.step()
             train_loss += loss.item()
         train_loss /= len(train_loader)
         train_hist.append(train_loss)
@@ -140,7 +155,7 @@ def train_fno(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader
         val_loss /= len(val_loader)
         val_hist.append(val_loss)
 
-        scheduler.step()
+        # scheduler.step()
         tqdm.write(f"    Epoch {epoch:02d}/{n_epochs} — train {train_loss:.2e}  val {val_loss:.2e}")
 
     # ---- plot loss history ----
@@ -192,7 +207,8 @@ def main():
     parser.add_argument("--epochs",   "-E", type=int, default=DEF_N_EPOCHS)
     parser.add_argument("--batch",    "-B", type=int, default=DEF_BATCH_SIZE)
     parser.add_argument("--out",              default="results")
-    parser.add_argument("--no-train", action="store_true", help="skip training/visualisation steps (speed plot only)")
+    parser.add_argument("--no-train",   action="store_true", help="skip training/visualisation steps (speed plot only)")
+    parser.add_argument("--infer",      action="store_true", help="skip training step (inference only)")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
