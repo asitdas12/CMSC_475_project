@@ -94,31 +94,32 @@ def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, mode='mixed'):
 
 # === Generate and save full dataset ===
 
-def save_dataset(u0_tensor, uT_tensor, save_dir='heat_trajectory_data'):
+def save_dataset(u0_tensor, uT_tensor, T, n_frames, save_dir='heat_trajectory_data'):
     os.makedirs(save_dir, exist_ok=True)
-    torch.save(u0_tensor, os.path.join(save_dir, 'u0.pt'))
-    torch.save(uT_tensor, os.path.join(save_dir, 'uT.pt'))
-    print(f"Saved tensors to '{save_dir}/u0.pt' and 'uT.pt'")
+    torch.save(u0_tensor, os.path.join(save_dir, f'u0_{T}_{n_frames}.pt'))
+    torch.save(uT_tensor, os.path.join(save_dir, f'uT_{T}_{n_frames}.pt'))
+    print(f"Saved tensors to '{save_dir}/u0_{T}_{n_frames}.pt' and 'uT_{T}_{n_frames}.pt'")
 
-# === Parameters ===
 
-N = 1000
-nx, ny = 64, 64
-dx = 1.0 / (nx - 1)
-dy = 1.0 / (ny - 1)
-dt = 0.01
-nt = 1000
-T = 20
+if __name__ == "__main__":
+    # === Parameters ===
+    N = 1000
+    nx, ny = 64, 64
+    dx = 1.0 / (nx - 1)
+    dy = 1.0 / (ny - 1)
+    dt = 0.01
+    nt = 1000
+    T = 20
 
-alpha = 0.001
+    alpha = 0.001
 
-u0_all, traj_all = [], []
-for _ in tqdm(range(N), desc="Generating dataset"):
-    u0, traj = generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, T, mode='mixed')
-    u0_all.append(u0)
-    traj_all.append(traj)
+    u0_all, traj_all = [], []
+    for _ in tqdm(range(N), desc="Generating dataset"):
+        u0, traj = generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, T, mode='mixed')
+        u0_all.append(u0)
+        traj_all.append(traj)
 
-u0_tensor = torch.tensor(np.stack(u0_all)[:, None, :, :], dtype=torch.float32)         # (N, 1, nx, ny)
-uT_tensor = torch.tensor(np.stack(traj_all), dtype=torch.float32)                     # (N, T, nx, ny)
+    u0_tensor = torch.tensor(np.stack(u0_all)[:, None, :, :], dtype=torch.float32)         # (N, 1, nx, ny)
+    uT_tensor = torch.tensor(np.stack(traj_all), dtype=torch.float32)                     # (N, T, nx, ny)
 
-save_dataset(u0_tensor, uT_tensor)
+    save_dataset(u0_tensor, uT_tensor)

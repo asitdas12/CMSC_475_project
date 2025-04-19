@@ -44,19 +44,20 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 
-from dataGen import generate_trajectory
+from dataGen import generate_trajectory, save_dataset
 from neuralop.models import FNO
 
 # -------------------------- default hyper-parameters --------------------------
-DEF_T_MIN, DEF_T_MAX, DEF_T_STEP = 5, 200, 5
-DEF_N_SAMPLES   = 128          # trajectories per T  (keep small ⇒ quick)
-DEF_N_EPOCHS    = 100          # FNO training epochs
-DEF_BATCH_SIZE  = 32
+DEF_T_MIN, DEF_T_MAX, DEF_T_STEP = 200, 200, 5
+DEF_N_SAMPLES   = 1000         # trajectories per T  (keep small ⇒ quick)
+DEF_N_EPOCHS    = 500          # FNO training epochs
+DEF_BATCH_SIZE  = 64
 DEF_ALPHA       = 1e-3
 DEF_NX = DEF_NY = 64
 DEF_DX = DEF_DY = 1.0 / (DEF_NX - 1)
 DEF_DT          = 0.01
-DEF_T_INTERVAL  = 1000
+DEF_T_INTERVAL  = 500
+HIDDEN_CHANNELS = 512
 # -----------------------------------------------------------------------------
 
 # ===== helpers ===============================================================
@@ -86,6 +87,9 @@ def gen_dataset(T: int, n_samples: int):
 
     u0_tensor = torch.tensor(np.stack(u0_all)[:, None], dtype=torch.float32)
     uT_tensor = torch.tensor(np.stack(traj_all),       dtype=torch.float32)
+
+    save_dataset(u0_tensor, uT_tensor)
+
     return u0_tensor, uT_tensor
 
 
@@ -208,7 +212,7 @@ def main():
         print(f"Dataset generated in {t_gen:.2f} s  ({args.samples} trajs × {T} steps)")
 
         # ---------- inference timing (tiny random network) ----------
-        model_time = FNO(n_modes=(20,20), hidden_channels=64,
+        model_time = FNO(n_modes=(20,20), hidden_channels=HIDDEN_CHANNELS,
                          in_channels=1, out_channels=T).to(device).eval()
         x_dummy = torch.randn(args.batch, 1, DEF_NX, DEF_NY, device=device)
 
@@ -251,29 +255,35 @@ def main():
             save_frames_and_gif(model, (u0_b[0], traj_b[0]), T, t_dir, device)
             print("Animation written →", t_dir / "trajectory.gif")
 
-    # ===== global timing plot =====
+    # ===== global timing plot csv =====
     df = pd.DataFrame(rows)
     df.to_csv(out_root / "timings.csv", index=False)
 
-    fig, ax = plt.subplots(figsize=(8,4))
-    ax.plot(df.T, df.dataset_sec,  "o-", label="dataset generation")
-    ax.plot(df.T, df.inference_sec, "s-", label="FNO inference")
-    ax.set_xlabel("stored time-steps  T")
-    ax.set_ylabel(f"seconds for {args.samples} samples (log-scale)")
-    ax.set_yscale("log");  ax.grid(True, which="both", ls="--")
+    # ------- timing plot -------------------------------------------------
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(df["T"], df["dataset_sec"],  "o-", label="dataset generation")
+    ax.plot(df["T"], df["inference_sec"], "s-", label="FNO inference")
+    ax.set_xlabel("stored time‑steps  T")
+    ax.set_ylabel(f"seconds for {args.samples} samples (log‑scale)")
+    ax.set_yscale("log")
+    ax.grid(True, which="both", ls="--")
     ax.legend()
 
     cross = df[df.inference_sec >= df.dataset_sec].head(1)
     if not cross.empty:
-        T_star = cross.T.values[0]
+        T_star = cross["T"].iloc[0]          # <─ pick the scalar safely
         ax.axvline(T_star, color="grey", ls=":")
-        ax.text(T_star, ax.get_ylim()[1]*0.5, f"crossover\nT≈{T_star}",
-                ha="right", va="center", rotation=90,
-                bbox=dict(fc="white", ec="grey", alpha=0.7))
+        ax.text(
+            T_star, ax.get_ylim()[1] * 0.5,
+            f"crossover\nT≈{T_star}",
+            ha="right", va="center", rotation=90,
+            bbox=dict(fc="white", ec="grey", alpha=0.7),
+        )
 
-    plt.tight_layout();
+    plt.tight_layout()
     fig_path = out_root / "benchmark_heat_dataset_vs_inference.png"
-    plt.savefig(fig_path, dpi=200);  plt.close()
+    plt.savefig(fig_path, dpi=200)
+    plt.close()
     print("\nSaved timing plot →", fig_path)
     print("All done!")
 
