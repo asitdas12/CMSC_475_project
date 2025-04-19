@@ -3,9 +3,8 @@ import torch
 import os
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
-
-os.chdir(os.path.dirname(__file__))
-
+import os
+os.chdir('C:/Users/jmmil/workspace/school/475/project')
 # === Initial condition patterns ===
 
 def random_gaussian_sum(nx, ny, num_blobs=3):
@@ -58,10 +57,10 @@ def generate_initial_condition(nx, ny, mode='mixed'):
 
 # === Generate a trajectory of solutions ===
 
-def generate_trajectory(nx, ny, dx, dy, dt, alpha, t_interval, n_frames, mode='mixed'):
+def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, mode='mixed'):
     u = generate_initial_condition(nx, ny, mode=mode)
     traj = [u.copy()]
-    steps_per_frame = t_interval // (n_frames - 1)
+    steps_per_frame = nt // (n_frames - 1)
     # add a small random constant to simulate some heat already in the system
     # u += np.random.rand(nx, ny) + 1
     
@@ -71,14 +70,19 @@ def generate_trajectory(nx, ny, dx, dy, dt, alpha, t_interval, n_frames, mode='m
                 (np.roll(u, 1, axis=0) - 2*u + np.roll(u, -1, axis=0)) / dx**2 +
                 (np.roll(u, 1, axis=1) - 2*u + np.roll(u, -1, axis=1)) / dy**2
             )
-
+            # Dirichlet boundary conditions
             # u[0, :] = u[-1, :] = u[:, 0] = u[:, -1] = 0.0
-            u[0, :len(u)//2] = 0
-            u[0, len(u)//2 :] = 1.5
-            u[-1, :] = 1.5
-            u[:, 0] = 0.0
-            u[:, -1] = np.max(u)
+            # u[0, :len(u)//2] = 0
+            # u[0, len(u)//2 :] = 1.5
+            # u[-1, :] = 1.5
+            # u[:, 0] = 0.0
+            # u[:, -1] = np.max(u)
 
+            # Neumann boundary conditions
+            u[0, :] = u[1, :]
+            u[-1, :] = u[-2, :]
+            u[:, 0] = u[:, 1]
+            u[:, -1] = u[:, -2]
             u += alpha * dt * lap
             
 
@@ -101,14 +105,14 @@ nx, ny = 64, 64
 dx = 1.0 / (nx - 1)
 dy = 1.0 / (ny - 1)
 dt = 0.01
-t_interval = 1000
-T = 20
+nt = 1000
+T = 200
 
 alpha = 0.001
 
 u0_all, traj_all = [], []
 for _ in tqdm(range(N), desc="Generating dataset"):
-    u0, traj = generate_trajectory(nx, ny, dx, dy, dt, alpha, t_interval, T, mode='mixed')
+    u0, traj = generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, T, mode='mixed')
     u0_all.append(u0)
     traj_all.append(traj)
 
