@@ -4,8 +4,7 @@ import os
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 import os
-# os.chdir('C:/Users/jmmil/workspace/school/475/project')
-os.chdir('./')
+os.chdir('C:/Users/jmmil/workspace/school/475/project')
 # === Initial condition patterns ===
 
 def random_gaussian_sum(nx, ny, num_blobs=3):
@@ -96,13 +95,13 @@ def save_dataset(u0_tensor, uT_tensor, save_dir='heat_trajectory_data'):
 
 # === Parameters ===
 
-N = 1000
+N = 1000            # number of samples
 nx, ny = 64, 64
 dx = 1.0 / (nx - 1)
 dy = 1.0 / (ny - 1)
-dt = 0.01
-nt = 1000
-T = 20
+dt = 0.001           # step size--PREV 0.01
+nt = 1000           # number of steps--PREV 2000
+T = 20              # images to generate
 
 alpha = 0.001
 
