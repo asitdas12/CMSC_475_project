@@ -81,13 +81,18 @@ def animate_comparison(x, y_true, y_pred, sample_idx=0, save_path="compare.gif")
     fig, axs = plt.subplots(3, 1, figsize=(4, 12))
     ims = []
 
+    row_titles = ["Initial Condition", "Ground Truth", "Prediction"]
     for t in range(T):
         ims.append([
             axs[0].imshow(x[sample_idx, 0].cpu(), cmap='inferno', animated=True),
             axs[1].imshow(y_true[sample_idx, t].cpu(), cmap='inferno', animated=True),
             axs[2].imshow(y_pred[sample_idx, t].cpu(), cmap='inferno', animated=True)
         ])
-        for ax in axs:
+        # for ax in axs:
+        #     ax.axis('off')
+
+        for ax, title in zip(axs, row_titles):
+            ax.set_title(title, fontsize=12)
             ax.axis('off')
 
     ani = animation.ArtistAnimation(fig, ims, interval=200, blit=True)
