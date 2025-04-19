@@ -4,7 +4,9 @@ import os
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 import os
-os.chdir('C:/Users/jmmil/workspace/school/475/project')
+
+os.chdir(os.path.dirname(__file__))
+
 # === Initial condition patterns ===
 
 def random_gaussian_sum(nx, ny, num_blobs=3):
