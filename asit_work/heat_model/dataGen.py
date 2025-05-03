@@ -1,0 +1,289 @@
+import numpy as np
+import torch
+import os
+from scipy.ndimage import gaussian_filter
+from tqdm import tqdm
+import os
+
+os.chdir(os.path.dirname(__file__))
+
+# === Initial condition patterns ===
+
+def random_gaussian_sum(nx, ny, num_blobs=3):
+    x, y = np.linspace(0, 1, nx), np.linspace(0, 1, ny)
+    X, Y = np.meshgrid(x, y, indexing='ij')
+    u0 = np.zeros((nx, ny))
+    for _ in range(np.random.randint(1, num_blobs + 1)):
+        xc, yc = np.random.rand(2) * 0.8 + 0.1
+        sigma = np.random.rand() * 0.05 + 0.02
+        amp = np.random.rand() * 2.5
+        u0 += amp * np.exp(-((X - xc)**2 + (Y - yc)**2) / (2 * sigma**2))
+    return u0
+
+def checkerboard_pattern(nx, ny, num_waves=4):
+    x, y = np.linspace(0, 1, nx), np.linspace(0, 1, ny)
+    X, Y = np.meshgrid(x, y, indexing='ij')
+    u0 = np.zeros((nx, ny))
+    for _ in range(np.random.randint(1, num_waves + 1)):
+        fx, fy = np.random.randint(1, 10, size=2)
+        phase = np.random.rand() * 2 * np.pi
+        amp = np.random.rand() * 2.5
+        u0 += amp * np.sin(2 * np.pi * fx * X + phase) * np.sin(2 * np.pi * fy * Y + phase)
+    return u0
+
+def spotty_noise(nx, ny, num_spots=100, smooth_sigma=1.5):
+    u0 = np.zeros((nx, ny))
+    for _ in range(num_spots):
+        i = np.random.randint(0, nx)
+        j = np.random.randint(0, ny)
+        u0[i, j] = np.random.rand() * 2.5
+    return gaussian_filter(u0, sigma=smooth_sigma)
+
+def generate_initial_condition(nx, ny, mode='mixed'):
+    if mode == 'gaussian':
+        return random_gaussian_sum(nx, ny)
+    elif mode == 'checkerboard':
+        return checkerboard_pattern(nx, ny)
+    elif mode == 'spotty':
+        return spotty_noise(nx, ny)
+    elif mode == 'mixed':
+        u_gaussian = random_gaussian_sum(nx, ny)
+        u_checkerboard = checkerboard_pattern(nx, ny)
+        u_spotty = spotty_noise(nx, ny)
+        return (u_gaussian + u_checkerboard + u_spotty) / 3
+    elif mode == 'random':
+        pattern = np.random.choice(['gaussian', 'checkerboard', 'spotty']) 
+        return generate_initial_condition(nx, ny, mode=pattern)
+    else:
+        raise ValueError(f"Invalid mode: {mode}")
+
+# === Generate a trajectory of solutions ===
+
+def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, mode='mixed'):
+    u = generate_initial_condition(nx, ny, mode=mode)
+    traj = [u.copy()]
+    steps_per_frame = nt // (n_frames - 1)
+    # add a small random constant to simulate some heat already in the system
+    # u += np.random.rand(nx, ny) + 1
+    
+    for _ in range(1, n_frames):
+        for _ in range(steps_per_frame):
+            lap = (
+                (np.roll(u, 1, axis=0) - 2*u + np.roll(u, -1, axis=0)) / dx**2 +
+                (np.roll(u, 1, axis=1) - 2*u + np.roll(u, -1, axis=1)) / dy**2
+            )
+            # Dirichlet boundary conditions
+            # u[0, :] = u[-1, :] = u[:, 0] = u[:, -1] = 0.0
+            # u[0, :len(u)//2] = 0
+            # u[0, len(u)//2 :] = 1.5
+            # u[-1, :] = 1.5
+            # u[:, 0] = 0.0
+            # u[:, -1] = np.max(u)
+
+            # Neumann boundary conditions
+            u[0, :] = u[1, :]
+            u[-1, :] = u[-2, :]
+            u[:, 0] = u[:, 1]
+            u[:, -1] = u[:, -2]
+            u += alpha * dt * lap
+            
+
+        traj.append(u.copy())
+
+    return traj[0], np.stack(traj)  # shape: (nx, ny), (T, nx, ny)
+
+# === Generate and save full dataset ===
+
+def save_dataset(u0_tensor, uT_tensor, save_dir='heat_trajectory_data'):
+    os.makedirs(save_dir, exist_ok=True)
+    torch.save(u0_tensor, os.path.join(save_dir, f'u0{u0_tensor.shape}.pt'))
+    torch.save(uT_tensor, os.path.join(save_dir, f'uT{uT_tensor.shape}.pt'))
+    print(f"Saved tensors to '{save_dir}/u0{u0_tensor.shape}.pt' and 'uT{uT_tensor.shape}.pt'")
+
+
+
+
+
+# Fokker-Plank data
+
+def fokker_plank(): 
+    # Parameters
+    nx, ny = 128, 128          # Grid resolution
+    dx = dy = 1.0 / (nx - 1)   # Grid spacing
+    dt = 0.001                 # Time step
+    D = 0.01                   # Diffusion coefficient
+    num_steps = 300            # Total time steps
+
+    # Create coordinate grid
+    x = np.linspace(0, 1, nx)
+    y = np.linspace(0, 1, ny)
+    X, Y = np.meshgrid(x, y, indexing='ij')
+
+    # Initial condition: 2D Gaussian blob
+    sigma = 0.05
+    p = np.exp(-((X - 0.5)**2 + (Y - 0.5)**2) / (2 * sigma**2))
+    p /= np.sum(p) * dx * dy  # Normalize to integrate to 1
+
+    # Store solution snapshots
+    solution = np.zeros((num_steps, nx, ny), dtype=np.float32)
+    solution[0] = p
+
+    # Fokker-Planck evolution (pure diffusion using finite differences)
+    for t in range(1, num_steps):
+        laplacian = (
+            np.roll(p, 1, axis=0) + np.roll(p, -1, axis=0) +
+            np.roll(p, 1, axis=1) + np.roll(p, -1, axis=1) -
+            4 * p
+        ) / dx**2
+
+        p = p + D * dt * laplacian
+        p[p < 0] = 0  # avoid numerical negatives
+        p /= np.sum(p) * dx * dy  # renormalize
+        solution[t] = p
+
+    # Convert to PyTorch tensor and save
+    tensor_data = torch.tensor(solution)
+    torch.save(tensor_data, "./fokker_planck_data/fokker_planck_2d.pt")
+    print("Dataset saved to fokker_planck_2d.pt with shape:", tensor_data.shape)
+
+
+def fp_dirichlet(): 
+    # Parameters
+    nx, ny = 128, 128
+    dx = dy = 1.0 / (nx - 1)
+    dt = 0.001
+    D = 0.01
+    num_steps = 1000
+
+    # Create coordinate grid
+    x = np.linspace(0, 1, nx)
+    y = np.linspace(0, 1, ny)
+    X, Y = np.meshgrid(x, y, indexing='ij')
+
+    # Initial condition: 2D Gaussian blob
+    sigma = 0.05
+    p = np.exp(-((X - 0.5)**2 + (Y - 0.5)**2) / (2 * sigma**2))
+    p /= np.sum(p) * dx * dy  # Normalize
+
+    # Store snapshots
+    solution = np.zeros((num_steps, nx, ny), dtype=np.float32)
+    solution[0] = p
+
+    # Evolution loop with Dirichlet boundaries (zero at edges)
+    for t in range(1, num_steps):
+        # Compute Laplacian only for interior points
+        laplacian = np.zeros_like(p)
+        laplacian[1:-1, 1:-1] = (
+            p[2:, 1:-1] + p[:-2, 1:-1] +
+            p[1:-1, 2:] + p[1:-1, :-2] -
+            4 * p[1:-1, 1:-1]
+        ) / dx**2
+
+        # Update interior
+        p[1:-1, 1:-1] += D * dt * laplacian[1:-1, 1:-1]
+
+        # Enforce Dirichlet BCs: boundary = 0
+        p[0, :] = 0
+        p[-1, :] = 0
+        p[:, 0] = 0
+        p[:, -1] = 0
+
+        # Normalize
+        p /= np.sum(p) * dx * dy
+        solution[t] = p
+
+    # Save tensor
+    tensor_data = torch.tensor(solution)
+    torch.save(tensor_data, "./fokker_planck_data/fokker_planck_dirichlet.pt")
+    print("Dataset saved to fokker_planck_dirichlet.pt with shape:", tensor_data.shape)
+
+
+
+def generate_fokker_planck_autonomous(nx=128, ny=128, dx=1.0, dy=1.0,
+                                      D=0.01, mu=1.0, dt=0.001, num_steps=300):
+    import torch.nn.functional as F
+    
+    # Create 2D grid
+    x = torch.linspace(-5, 5, steps=nx)
+    y = torch.linspace(-5, 5, steps=ny)
+    X, Y = torch.meshgrid(x, y, indexing='ij')
+
+    # Define static potential V(x, y), e.g. double-well or harmonic
+    V = 0.5 * (X**2 + Y**2)  # harmonic potential
+    Fx = -torch.gradient(V, spacing=(dx, dy))[0]  # -dV/dx
+    Fy = -torch.gradient(V, spacing=(dx, dy))[1]  # -dV/dy
+
+    # Initialize p(x, y, 0): a Gaussian blob
+    p = torch.exp(-((X - 1)**2 + (Y + 1)**2) / 0.5)
+    p /= p.sum()  # Normalize
+
+    # Storage for time evolution
+    data = torch.zeros((num_steps, nx, ny))
+    data[0] = p
+
+    for t in range(1, num_steps):
+        # Compute Laplacian (diffusion)
+        lap_p = (
+            -4 * p
+            + F.pad(p, (0, 0, 1, 0))[0:-1, :]  # up
+            + F.pad(p, (0, 0, 0, 1))[1:, :]    # down
+            + F.pad(p, (1, 0, 0, 0))[:, 0:-1]  # left
+            + F.pad(p, (0, 1, 0, 0))[:, 1:]    # right
+        ) / (dx * dy)
+
+        # Compute drift: ∇·(F p)
+        div_Fp_x = (
+            F.pad(Fx * p, (0, 0, 1, 0))[0:-1, :] - F.pad(Fx * p, (0, 0, 0, 1))[1:, :]
+        ) / (2 * dx)
+        div_Fp_y = (
+            F.pad(Fy * p, (1, 0, 0, 0))[:, 0:-1] - F.pad(Fy * p, (0, 1, 0, 0))[:, 1:]
+        ) / (2 * dy)
+
+        div_Fp = div_Fp_x + div_Fp_y
+
+        # Update rule: p_{t+1} = p_t + dt (D * ∇²p - ∇·(Fp))
+        dpdt = D * lap_p - mu * div_Fp
+        p = p + dt * dpdt
+
+        # Clamp to non-negative and renormalize
+        p = torch.clamp(p, min=0)
+        p /= p.sum()
+
+        data[t] = p
+
+    # return data
+
+    # save
+    torch.save(data, "./fokker_planck_data/fokker_planck_autonomous.pt")
+    print("Dataset saved as fokker_planck_autonomous.pt")
+
+
+
+
+
+# === Parameters ===
+if __name__ == "__main__":
+    # N = 1000
+    # nx, ny = 64, 64
+    # dx = 1.0 / (nx - 1)
+    # dy = 1.0 / (ny - 1)
+    # dt = 0.01
+    # nt = 1000
+    # T = 20
+
+    # alpha = 0.001
+
+    # u0_all, traj_all = [], []
+    # for _ in tqdm(range(N), desc="Generating dataset"):
+    #     u0, traj = generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, T, mode='mixed')
+    #     u0_all.append(u0)
+    #     traj_all.append(traj)
+
+    # u0_tensor = torch.tensor(np.stack(u0_all)[:, None, :, :], dtype=torch.float32)         # (N, 1, nx, ny)
+    # uT_tensor = torch.tensor(np.stack(traj_all), dtype=torch.float32)                     # (N, T, nx, ny)
+
+    # save_dataset(u0_tensor, uT_tensor)
+
+    fokker_plank()
+    fp_dirichlet()
+    generate_fokker_planck_autonomous()
