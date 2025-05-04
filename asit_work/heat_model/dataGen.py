@@ -106,13 +106,13 @@ def save_dataset(u0_tensor, uT_tensor, save_dir='heat_trajectory_data'):
 
 # Fokker-Plank data
 
-def fokker_plank(): 
+def fokker_planck(): 
     # Parameters
-    nx, ny = 128, 128          # Grid resolution
+    nx, ny = 64, 64          # Grid resolution
     dx = dy = 1.0 / (nx - 1)   # Grid spacing
     dt = 0.001                 # Time step
     D = 0.01                   # Diffusion coefficient
-    num_steps = 300            # Total time steps
+    num_steps = 1000            # Total time steps
 
     # Create coordinate grid
     x = np.linspace(0, 1, nx)
@@ -149,7 +149,7 @@ def fokker_plank():
 
 def fp_dirichlet(): 
     # Parameters
-    nx, ny = 128, 128
+    nx, ny = 64, 64
     dx = dy = 1.0 / (nx - 1)
     dt = 0.001
     D = 0.01
@@ -199,9 +199,17 @@ def fp_dirichlet():
 
 
 
-def generate_fokker_planck_autonomous(nx=128, ny=128, dx=1.0, dy=1.0,
-                                      D=0.01, mu=1.0, dt=0.001, num_steps=300):
+def generate_fokker_planck_autonomous(): 
     import torch.nn.functional as F
+    
+    nx=64
+    ny=64
+    dx=1.0 / (nx - 1)
+    dy=1.0 / (nx - 1)
+    D=0.01
+    mu=1.0
+    dt=0.001
+    num_steps=1000
     
     # Create 2D grid
     x = torch.linspace(-5, 5, steps=nx)
@@ -258,6 +266,99 @@ def generate_fokker_planck_autonomous(nx=128, ny=128, dx=1.0, dy=1.0,
     print("Dataset saved as fokker_planck_autonomous.pt")
 
 
+def generate_heat_graph():
+
+    import networkx as nx
+    
+    nn_x = nn_y = 16
+
+    # Create a 2D grid graph (10x10)
+    G = nx.grid_2d_graph(nn_x, nn_y)
+    n_nodes = G.number_of_nodes()
+    
+    # Map 2D grid node labels to integer labels
+    mapping = {node: i for i, node in enumerate(G.nodes())}
+    G = nx.relabel_nodes(G, mapping)
+    
+    # Adjacency and Laplacian
+    A = nx.adjacency_matrix(G).todense()
+    A = torch.tensor(A, dtype=torch.float32)
+    D = torch.diag(A.sum(dim=1))
+    L = D - A  # Unnormalized Laplacian
+
+    # Initial heat distribution (hot at center node)
+    u = torch.zeros(n_nodes)
+    center_node = n_nodes // 2
+    u[center_node] = 1.0
+
+    # Time parameters
+    dt = 0.01
+    num_steps = 1000
+    data = torch.zeros((num_steps, n_nodes))
+    data[0] = u
+
+    # Time evolution
+    for t in range(1, num_steps):
+        du_dt = -L @ u
+        u = u + dt * du_dt
+        data[t] = u
+
+    data = data.view(num_steps, nn_x, nn_y)
+
+    # Save tensor
+    torch.save(data, "./heat_data/heat_graph.pt")
+    print("Dataset saved to heat_graph.pt with shape:", data.shape)
+
+
+
+def heston_joint_density(): 
+    # Parameters
+    num_paths = 10000
+    num_steps = 1000
+    T = 1.0
+    dt = T / num_steps
+    mu = 0.05
+    kappa = 2.0
+    theta = 0.04
+    sigma = 0.3
+    rho = -0.7
+
+    S0 = 100.0
+    v0 = 0.04
+
+    # Preallocate
+    S = np.zeros((num_paths, num_steps))
+    v = np.zeros((num_paths, num_steps))
+    S[:, 0] = S0
+    v[:, 0] = v0
+
+    # Correlated Brownian motions
+    Z1 = np.random.randn(num_paths, num_steps - 1)
+    Z2 = rho * Z1 + np.sqrt(1 - rho**2) * np.random.randn(num_paths, num_steps - 1)
+
+    for t in range(1, num_steps):
+        vt = v[:, t - 1]
+        vt = np.clip(vt, 0, None)  # Ensure non-negative variance
+        S[:, t] = S[:, t - 1] + mu * S[:, t - 1] * dt + np.sqrt(vt * dt) * S[:, t - 1] * Z1[:, t - 1]
+        v[:, t] = v[:, t - 1] + kappa * (theta - v[:, t - 1]) * dt + sigma * np.sqrt(vt * dt) * Z2[:, t - 1]
+
+    # Build 2D joint histogram (heatmap) over time
+    xmin, xmax = 50, 200
+    vmin, vmax = 0, 0.2
+    nbins = 100
+    heatmaps = np.zeros((num_steps, nbins, nbins), dtype=np.float32)
+    edges_x = np.linspace(xmin, xmax, nbins + 1)
+    edges_y = np.linspace(vmin, vmax, nbins + 1)
+
+    for t in range(num_steps):
+        hist, _, _ = np.histogram2d(S[:, t], v[:, t], bins=[edges_x, edges_y], density=True)
+        heatmaps[t] = hist
+
+    # Convert to torch tensor and save
+    tensor_data = torch.tensor(heatmaps)
+    torch.save(tensor_data, "./heston_data/heston_joint_density.pt")
+    print("Saved to heston_joint_density.pt with shape:", tensor_data.shape)
+
 
 
 
@@ -284,6 +385,8 @@ if __name__ == "__main__":
 
     # save_dataset(u0_tensor, uT_tensor)
 
-    fokker_plank()
+    fokker_planck()
     fp_dirichlet()
     generate_fokker_planck_autonomous()
+    generate_heat_graph()
+    heston_joint_density()

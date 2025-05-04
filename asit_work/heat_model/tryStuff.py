@@ -24,16 +24,21 @@ os.chdir(os.path.dirname(__file__))
 #     print(f"Loaded dataset from {save_dir}")
 #     return u0, uT
 
-# fokker-plank load_dataset
+# load_datasets
 def load_dataset(mode=""):
      data = None
 
-     if mode == "std": 
+     if mode == "fokker_planck_2d": 
           data = torch.load("./fokker_planck_data/fokker_planck_2d.pt")
-     elif mode == "dir": 
+     elif mode == "fokker_planck_dirichlet": 
           data = torch.load("./fokker_planck_data/fokker_planck_dirichlet.pt")
-     elif mode == "auto": 
+     elif mode == "fokker_planck_autonomous": 
           data = torch.load("./fokker_planck_data/fokker_planck_autonomous.pt")
+     elif mode == "heat_graph": 
+          data = torch.load("./heat_data/heat_graph.pt")
+     elif mode == "heston_joint_density": 
+          data = torch.load("./heston_data/heston_joint_density.pt")
+
      else: 
           print("need to specify mode")
           quit()
@@ -66,38 +71,11 @@ def load_dataset(mode=""):
 
 
 
-def generate_ground_truth_gif(target_tensor, filename="ground_truth.gif", steps=30, start_index=0):
-    # Set up figure
-    fig, ax = plt.subplots()
-    rcParams['animation.embed_limit'] = 2**128  # Increase limit if needed
-    ax.axis('off')
-
-    # Initial image
-    img_display = ax.imshow(target_tensor[start_index].squeeze().cpu().numpy(), cmap='hot')
-
-    def update(frame_idx):
-        img = target_tensor[start_index + frame_idx].squeeze().cpu().numpy()
-        img_display.set_data(img)
-        return [img_display]
-
-    ani = animation.FuncAnimation(
-        fig,
-        update,
-        frames=steps,
-        blit=True,
-        repeat=False
-    )
-
-    ani.save(filename, writer='pillow', fps=5)
-    plt.close(fig)
-
-    print(f"Ground truth GIF saved as: {filename}")
-
-
 # === Predict and Save Figures ===
 def main():
+     mode = "heston_joint_density"
      # u0_tensor, uT_tensor = load_dataset()
-     tensor_data = load_dataset(mode="dir")
+     tensor_data = load_dataset(mode)
      # Prepare (input, target) pairs: (t) -> (t+1)
      input_tensor = tensor_data[:-1].unsqueeze(1)     # shape: (99, 1, 100, 100)
      target_tensor = tensor_data[1:].unsqueeze(1)     # shape: (99, 1, 100, 100)
@@ -152,14 +130,16 @@ def main():
      test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
      model = FNO(n_modes=(20, 20), hidden_channels=64, in_channels=1, out_channels=T)
-     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+     device = torch.device('mps' if torch.mps.is_available() else 'cpu')
+
      model.to(device)
 
      optimizer = AdamW(model.parameters(), lr=1e-3)
      scheduler = StepLR(optimizer, step_size=25, gamma=0.5)
      criterion = torch.nn.MSELoss()
 
-     n_epochs = 100
+     n_epochs = 50
      for epoch in tqdm(range(1, n_epochs + 1), desc = "Training"):
           model.train()
           train_loss = 0.0
@@ -197,6 +177,13 @@ def main():
 
      print(f"Epoch {epoch} — Avg Val Loss: {val_loss / len(val_loader):.4e}")
 
+     print(f"Saving model to ./saved_models/{mode}/{mode}_saved_model.pt")
+     torch.save(model.state_dict(), f"./saved_models/{mode}/{mode}_saved_model.pt")
+     
+     # print(f"Loading model from ./saved_models/{mode}/{mode}_saved_model.pt")
+     # model = Model().load_state_dict(f"./saved_models/{mode}/{mode}_saved_model.pt")
+     # model.to(device)
+
 # === Visualization ===
 
      # model.eval()
@@ -211,11 +198,38 @@ def main():
      #      plot_and_save_trajectory(x, y_true, y_pred, sample_idx=i, save_dir="figures", prefix="epoch_final")
 
 
+     def generate_ground_truth_gif(target_tensor, filename=f"./{mode}/{mode}_ground_truth.gif", steps=30, start_index=0):
+          # Set up figure
+          fig, ax = plt.subplots()
+          rcParams['animation.embed_limit'] = 2**128  # Increase limit if needed
+          ax.axis('off')
 
-     generate_ground_truth_gif(tensor_data.unsqueeze(1), filename="ground_truth.gif", steps=1000)
+          # Initial image
+          img_display = ax.imshow(target_tensor[start_index].squeeze().cpu().numpy(), cmap='hot')
+
+          def update(frame_idx):
+               img = target_tensor[start_index + frame_idx].squeeze().cpu().numpy()
+               img_display.set_data(img)
+               return [img_display]
+
+          ani = animation.FuncAnimation(
+               fig,
+               update,
+               frames=steps,
+               blit=True,
+               repeat=False
+          )
+
+          ani.save(filename, writer='pillow', fps=5)
+          plt.close(fig)
+
+          print(f"Ground truth GIF saved as: {filename}")
 
 
-     def generate_gif(model, start_input, steps=30, filename="fokker_planck_prediction.gif"):
+     generate_ground_truth_gif(target_tensor=tensor_data.unsqueeze(1), steps=1000)
+
+
+     def generate_gif(model, start_input, steps=30, filename=f"./{mode}/{mode}_prediction.gif"):
           model.eval()
           current = start_input.unsqueeze(0).to(device)  # shape: (1, 1, H, W)
           outputs = []
