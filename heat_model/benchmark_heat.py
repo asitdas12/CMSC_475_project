@@ -307,6 +307,9 @@ def main():
         t_inf = torch_now(device) - t0
         print(f"FNO inference (untrained) done in {t_inf:.4f} s")
 
+        del model_time, x_dummy
+        torch.cuda.empty_cache()
+        
         # ---------- optional training / visualisation ----------
         if not args.no_train:
             t_dir = out_root / f"T_{T}"
@@ -329,6 +332,11 @@ def main():
 
             # ---- trajectory animation ----
             t_inf = inference_loop(model, test_dl, t_dir, T, device)
+
+            # free up GPU memory
+            del model, train_dl, val_dl, test_dl, u0_tensor, uT_tensor
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect() # defragment the cache
         
         avg_t_data_gen = sum(t_gen)/len(t_gen)
         avg_t_inf = sum(t_inf)/len(t_inf)

@@ -98,8 +98,11 @@ def main():
         t1 = torch_now(device) - t0
         print(f"Dataset generated in {t1:.2f} s  ({args.samples} samples x {T} trajs (frames) x {DEF_T_INTERVAL} steps (time resolution))")
 
+        # ---------- data loaders ----------
+        train_dl, val_dl, test_dl = build_loaders(u0_tensor, uT_tensor, args.batch)
+
         # ---------- inference timing (tiny random network) ----------
-        model_time = FNO(n_modes=(20,20), hidden_channels=HIDDEN_CHANNELS,
+        model_time = FNO(n_modes=(DEF_NX,DEF_NY), hidden_channels=HIDDEN_CHANNELS,
                          in_channels=1, out_channels=T).to(device).eval()
         x_dummy = torch.randn(args.batch, 1, DEF_NX, DEF_NY, device=device)
 
@@ -115,17 +118,19 @@ def main():
         t_inf = torch_now(device) - t0
         print(f"FNO inference (untrained) done in {t_inf:.4f} s")
 
+        del model_time, x_dummy
+        torch.cuda.empty_cache()
+        
+        
+        model = FNO(n_modes=(DEF_NX,DEF_NY), hidden_channels=HIDDEN_CHANNELS,
+                    in_channels=1, out_channels=T).to(device)
+
         # ---------- optional training / visualisation ----------
         if not args.no_train:
             t_dir = out_root / f"T_{T}_resolution_{xy}"
             if t_dir.exists():
                 shutil.rmtree(t_dir)
             t_dir.mkdir(parents=True)
-
-            train_dl, val_dl, test_dl = build_loaders(u0_tensor, uT_tensor, args.batch)
-
-            model = FNO(n_modes=(20,20), hidden_channels=64,
-                        in_channels=1, out_channels=T).to(device)
 
             print("Training FNO ...")
             train_fno(model, train_dl, val_dl, args.epochs, device, t_dir)
@@ -134,9 +139,18 @@ def main():
             ckpt_path = models_dir / f"fno_T_{T}_resolution_{xy}.pth"
             torch.save(model.state_dict(), ckpt_path)
             print(f"Saved model -> {ckpt_path}")
+        else: # Load pretrained model
+            ckpt_path = models_dir / f"fno_T_{T}_resolution_{xy}.pth"
+            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+            print(f"Loaded model -> {ckpt_path}")
 
-            # ---- trajectory animation ----
-            t_inf = inference_loop(model, test_dl, t_dir, T, device)
+        # ---- trajectory animation ----
+        t_inf = inference_loop(model, test_dl, t_dir, T, device)
+
+        # free up GPU memory
+        del model, train_dl, val_dl, test_dl, u0_tensor, uT_tensor
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect() # defragment the cache
         
         avg_t_data_gen = sum(t_gen)/len(t_gen)
         avg_t_inf = sum(t_inf)/len(t_inf)
