@@ -8,11 +8,12 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import os
 
-# fokker-plank imports
+# asit_work imports
 from torch.utils.data import random_split
 # import imageio
 import matplotlib.animation as animation
 from matplotlib import rcParams
+import numpy as np
 
 os.chdir(os.path.dirname(__file__))
 
@@ -38,6 +39,12 @@ def load_dataset(mode=""):
           data = torch.load("./heat_data/heat_graph.pt")
      elif mode == "heston_joint_density": 
           data = torch.load("./heston_data/heston_joint_density.pt")
+     elif mode == "navier_stokes_2d": 
+          data = torch.load("./navier_stokes_data/navier_stokes_2d.pt")
+     elif mode == "spectral_navier_stokes": 
+          u0 = torch.load("./navier_stokes_data/spectral_navier_stokes_u0.pt")
+          uT = torch.load("./navier_stokes_data/spectral_navier_stokes_uT.pt")
+          data = [u0, uT]
 
      else: 
           print("need to specify mode")
@@ -73,17 +80,28 @@ def load_dataset(mode=""):
 
 # === Predict and Save Figures ===
 def main():
-     mode = "heston_joint_density"
+     mode = "spectral_navier_stokes"
      # u0_tensor, uT_tensor = load_dataset()
      tensor_data = load_dataset(mode)
      # Prepare (input, target) pairs: (t) -> (t+1)
-     input_tensor = tensor_data[:-1].unsqueeze(1)     # shape: (99, 1, 100, 100)
-     target_tensor = tensor_data[1:].unsqueeze(1)     # shape: (99, 1, 100, 100)
+     if mode == "navier_stokes_2d": 
+          input_tensor = tensor_data[:-1]
+          target_tensor = tensor_data[1:] 
+     elif mode == "spectral_navier_stokes": 
+          initial_cond = tensor_data[0][0].unsqueeze(0)
+          rest_of_data = tensor_data[1][0]
+          tensor_data = torch.cat([initial_cond, rest_of_data], dim=0)
+          input_tensor = tensor_data[:-1]
+          target_tensor = tensor_data[1:]
+     else: 
+          input_tensor = tensor_data[:-1].unsqueeze(1)     # shape: (99, 1, 100, 100)
+          target_tensor = tensor_data[1:].unsqueeze(1)     # shape: (99, 1, 100, 100)
 
      # T = uT_tensor.shape[1]
      T = target_tensor.shape[1]
 
      # #debug
+     # print(f"input_tensor.shape: {input_tensor.shape}")
      # print(f"target_tensor.shape: {target_tensor.shape}")
      # quit()
      # #debug
@@ -129,7 +147,7 @@ def main():
      val_loader = DataLoader(val_dataset, batch_size=batch_size)
      test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
-     model = FNO(n_modes=(20, 20), hidden_channels=64, in_channels=1, out_channels=T)
+     model = FNO(n_modes=(20, 20), hidden_channels=64, in_channels=T, out_channels=T)
      # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
      device = torch.device('mps' if torch.mps.is_available() else 'cpu')
 
@@ -139,50 +157,51 @@ def main():
      scheduler = StepLR(optimizer, step_size=25, gamma=0.5)
      criterion = torch.nn.MSELoss()
 
-     n_epochs = 50
-     for epoch in tqdm(range(1, n_epochs + 1), desc = "Training"):
-          model.train()
-          train_loss = 0.0
-          with tqdm(train_loader, desc=f"[Epoch {epoch}] Training", leave=False, position=1) as pbar:
+     if (1==0): 
+          n_epochs = 50
+          for epoch in tqdm(range(1, n_epochs + 1), desc = "Training"):
+               model.train()
+               train_loss = 0.0
+               with tqdm(train_loader, desc=f"[Epoch {epoch}] Training", leave=False, position=1) as pbar:
+                    for batch in pbar:
+                         x = batch['x'].to(device)
+                         y = batch['y'].to(device)
+
+                         optimizer.zero_grad()
+                         y_pred = model(x)
+                         loss = criterion(y_pred, y)
+                         loss.backward()
+                         optimizer.step()
+
+                         train_loss += loss.item()
+                         pbar.set_postfix(loss=loss.item())
+
+                         # #debug
+                         # print(loss.item())
+                         # #debug
+
+          scheduler.step()
+          print(f"Epoch {epoch} — Avg Train Loss: {train_loss / len(train_loader):.4e}")
+
+          model.eval()
+          val_loss = 0.0
+          with torch.no_grad(), tqdm(val_loader, desc=f"[Epoch {epoch}] Validating") as pbar:
                for batch in pbar:
                     x = batch['x'].to(device)
                     y = batch['y'].to(device)
-
-                    optimizer.zero_grad()
                     y_pred = model(x)
                     loss = criterion(y_pred, y)
-                    loss.backward()
-                    optimizer.step()
+                    val_loss += loss.item()
+                    pbar.set_postfix(val_loss=loss.item())
 
-                    train_loss += loss.item()
-                    pbar.set_postfix(loss=loss.item())
+          print(f"Epoch {epoch} — Avg Val Loss: {val_loss / len(val_loader):.4e}")
 
-                    # #debug
-                    # print(loss.item())
-                    # #debug
-
-     scheduler.step()
-     print(f"Epoch {epoch} — Avg Train Loss: {train_loss / len(train_loader):.4e}")
-
-     model.eval()
-     val_loss = 0.0
-     with torch.no_grad(), tqdm(val_loader, desc=f"[Epoch {epoch}] Validating") as pbar:
-          for batch in pbar:
-               x = batch['x'].to(device)
-               y = batch['y'].to(device)
-               y_pred = model(x)
-               loss = criterion(y_pred, y)
-               val_loss += loss.item()
-               pbar.set_postfix(val_loss=loss.item())
-
-     print(f"Epoch {epoch} — Avg Val Loss: {val_loss / len(val_loader):.4e}")
-
-     print(f"Saving model to ./saved_models/{mode}/{mode}_saved_model.pt")
-     torch.save(model.state_dict(), f"./saved_models/{mode}/{mode}_saved_model.pt")
-     
-     # print(f"Loading model from ./saved_models/{mode}/{mode}_saved_model.pt")
-     # model = Model().load_state_dict(f"./saved_models/{mode}/{mode}_saved_model.pt")
-     # model.to(device)
+          print(f"Saving model to ./saved_models/{mode}/{mode}_saved_model.pt")
+          torch.save(model.state_dict(), f"./saved_models/{mode}/{mode}_saved_model.pt")
+     else: 
+          print(f"Loading model from ./saved_models/{mode}/{mode}_saved_model.pt")
+          model.load_state_dict(torch.load(f"./saved_models/{mode}/{mode}_saved_model.pt"))
+          model.to(device)
 
 # === Visualization ===
 
@@ -197,7 +216,6 @@ def main():
      # for i in range(5):
      #      plot_and_save_trajectory(x, y_true, y_pred, sample_idx=i, save_dir="figures", prefix="epoch_final")
 
-
      def generate_ground_truth_gif(target_tensor, filename=f"./{mode}/{mode}_ground_truth.gif", steps=30, start_index=0):
           # Set up figure
           fig, ax = plt.subplots()
@@ -205,10 +223,25 @@ def main():
           ax.axis('off')
 
           # Initial image
-          img_display = ax.imshow(target_tensor[start_index].squeeze().cpu().numpy(), cmap='hot')
+          initial_image = target_tensor[start_index].squeeze().cpu().numpy()
+
+          if ("navier" in mode): 
+               u = target_tensor[start_index][0].cpu().numpy()
+               v = target_tensor[start_index][1].cpu().numpy()
+               initial_image = np.sqrt(u**2 + v**2).squeeze()
+
+          img_display = ax.imshow(initial_image, cmap='hot')
 
           def update(frame_idx):
-               img = target_tensor[start_index + frame_idx].squeeze().cpu().numpy()
+
+               if ("navier" in mode): 
+                    u = target_tensor[start_index + frame_idx][0].cpu().numpy()
+                    v = target_tensor[start_index + frame_idx][1].cpu().numpy()
+                    img = np.sqrt(u**2 + v**2)
+               else: 
+                    img = target_tensor[start_index + frame_idx].squeeze().cpu().numpy()
+
+
                img_display.set_data(img)
                return [img_display]
 
@@ -225,8 +258,10 @@ def main():
 
           print(f"Ground truth GIF saved as: {filename}")
 
-
-     generate_ground_truth_gif(target_tensor=tensor_data.unsqueeze(1), steps=1000)
+     if ("navier" in mode): 
+          generate_ground_truth_gif(target_tensor=tensor_data, steps=100)
+     else: 
+          generate_ground_truth_gif(target_tensor=tensor_data.unsqueeze(1), steps=100)
 
 
      def generate_gif(model, start_input, steps=30, filename=f"./{mode}/{mode}_prediction.gif"):
@@ -237,7 +272,15 @@ def main():
           with torch.no_grad():
                for _ in range(steps):
                     output = model(current)
-                    outputs.append(output[0].cpu().squeeze().numpy())
+
+                    if ("navier" in mode): 
+                         u = output[0, 0].cpu().numpy()  # shape: (64, 64)
+                         v = output[0, 1].cpu().numpy()  # shape: (64, 64)
+                         mag = np.sqrt(u**2 + v**2)
+                         outputs.append(mag)
+                    else: 
+                         outputs.append(output[0].cpu().squeeze().numpy())
+
                     current = output  # autoregressive step
 
           # Create animation
@@ -272,7 +315,7 @@ def main():
      # quit()
      # #debug
 
-     generate_gif(model, sample_input, steps=1000)
+     generate_gif(model, sample_input, steps=100)
 
 
 
