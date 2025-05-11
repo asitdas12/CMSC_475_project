@@ -59,9 +59,11 @@ def generate_initial_condition(nx, ny, mode='mixed'):
 
 # === Generate a trajectory of solutions ===
 
-def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, mode='mixed'):
-    u = generate_initial_condition(nx, ny, mode=mode)
-    traj = [u.copy()]
+def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='mixed', boundary='neumann'):
+    if u is None: # u is the initial conditions for the heat trajectory (frame 0)
+        u = generate_initial_condition(nx, ny, mode=mode)
+        
+    traj = [u.copy()] # Note: traj[0] is the initial frame of the trajectory
     steps_per_frame = nt // (n_frames - 1)
     # add a small random constant to simulate some heat already in the system
     # u += np.random.rand(nx, ny) + 1
@@ -72,20 +74,26 @@ def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, mode='mixed'):
                 (np.roll(u, 1, axis=0) - 2*u + np.roll(u, -1, axis=0)) / dx**2 +
                 (np.roll(u, 1, axis=1) - 2*u + np.roll(u, -1, axis=1)) / dy**2
             )
-            # Dirichlet boundary conditions
-            # u[0, :] = u[-1, :] = u[:, 0] = u[:, -1] = 0.0
-            # u[0, :len(u)//2] = 0
-            # u[0, len(u)//2 :] = 1.5
-            # u[-1, :] = 1.5
-            # u[:, 0] = 0.0
-            # u[:, -1] = np.max(u)
 
-            # Neumann boundary conditions
-            u[0, :] = u[1, :]
-            u[-1, :] = u[-2, :]
-            u[:, 0] = u[:, 1]
-            u[:, -1] = u[:, -2]
-            u += alpha * dt * lap
+            # Boundary selection for each frame
+            # TODO: Add a Boundary class
+            match boundary:
+                # Neumann boundary conditions
+                case 'neumann':
+                    u[0, :] = u[1, :]
+                    u[-1, :] = u[-2, :]
+                    u[:, 0] = u[:, 1]
+                    u[:, -1] = u[:, -2]
+                    u += alpha * dt * lap
+
+                # Dirichlet boundary conditions
+                case 'dirichlet':
+                    u[0, :] = u[-1, :] = u[:, 0] = u[:, -1] = 0.0
+                    u[0, :len(u)//2] = 0
+                    u[0, len(u)//2 :] = 1.5
+                    u[-1, :] = 1.5
+                    u[:, 0] = 0.0
+                    u[:, -1] = np.max(u)
             
 
         traj.append(u.copy())

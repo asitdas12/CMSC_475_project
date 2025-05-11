@@ -1,10 +1,10 @@
-# benchmark_heat_enhanced.py
+# benchmark_heat.py
 """
 Extended benchmark script for the 2-D heat-equation example
 ===========================================================
 
 This script now performs *three* tasks for a sweep of stored
- time-steps **T = 5 … 200** (step 5):
+ time-steps **T = 5 ... 200** (step 5):
 
 1. **Speed benchmark** ― wall-clock seconds required to
    • generate *N_SAMPLES* trajectories (traditional FD solver), and
@@ -27,12 +27,12 @@ All artefacts live below *results/T_XX/*, and an extra *models/*
 folder keeps a checkpoint *fno_T_XX.pth* for each time-horizon.
 Feel free to tweak hyper-parameters with command-line flags; run
 
-    python benchmark_heat_enhanced.py --help
+    python benchmark_heat.py --help
 
 for details.
 """
 
-import argparse, os, time, math, shutil
+import argparse, time, math, shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -44,8 +44,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 
-from dataGen import generate_trajectory, save_dataset
+from dataGen import generate_initial_condition, generate_trajectory, save_dataset
 from neuralop.models import FNO
+
 
 # -------------------------- default hyper-parameters --------------------------
 DEF_T_MIN, DEF_T_MAX, DEF_T_STEP = 200, 200, 5
@@ -69,7 +70,11 @@ def torch_now(device):
     return time.perf_counter()
 
 
-def gen_dataset(T: int, n_samples: int):
+def save_time(time, n_samples, T):
+    df = pd.DataFrame({"time": time, "n_samples": n_samples, "T": T})
+    df.to_csv(f"results/time-{T}-samples-{n_samples}.csv", index=False)
+
+def gen_dataset(T: int, n_samples: int, device):
     """Generate *n_samples* full trajectories of length *T*.
 
     Returns two tensors:
@@ -77,11 +82,19 @@ def gen_dataset(T: int, n_samples: int):
         uT  — shape (N, T, H, W)
     """
     u0_all, traj_all = [], []
-    for _ in tqdm(range(n_samples), desc=f"Generating dataset for {n_samples} samples"):
+    times = []
+    for sample in tqdm(range(n_samples), desc=f"Generating dataset for {n_samples} samples"):
+        init_condition = generate_initial_condition(DEF_NX, DEF_NY, mode="mixed")
+        # Calculate the time for entire trajectory
+        t0 = torch_now(device)
         u0, traj = generate_trajectory(
-            DEF_NX, DEF_NY, DEF_DX, DEF_DY, DEF_DT, DEF_ALPHA,
-            DEF_T_INTERVAL, T, mode="mixed"
+            nx=DEF_NX, ny=DEF_NY, dx=DEF_DX, dy=DEF_DY, dt=DEF_DT, alpha=DEF_ALPHA,
+            nt=DEF_T_INTERVAL, n_frames=T, u=init_condition
         )
+        times.append(torch_now(device) - t0)
+        
+        # print(f"[sample-{sample}]Time for calculating trajectory: {time[-1]}")
+
         u0_all.append(u0)
         traj_all.append(traj)
 
@@ -89,6 +102,9 @@ def gen_dataset(T: int, n_samples: int):
     uT_tensor = torch.tensor(np.stack(traj_all),       dtype=torch.float32)
 
     save_dataset(u0_tensor, uT_tensor)
+    save_time(times, n_samples, T)
+
+    print(f"Average time per trajectory: {np.mean(times):.4f} s")
 
     return u0_tensor, uT_tensor
 
@@ -135,6 +151,10 @@ def train_fno(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader
             scheduler.step()
 
         # ---- training ----
+        '''
+        u0:     initial conditions (to be predicted/inferenced)
+        traj:   full trajectories (ground truth)
+        '''
         model.train();   train_loss = 0.0
         for u0, traj in train_loader:
             u0, traj = u0.to(device), traj.to(device)
@@ -170,14 +190,34 @@ def train_fno(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader
     return train_hist, val_hist
 
 
-def save_frames_and_gif(model: nn.Module, sample: tuple, T: int, save_dir: Path,
-                        device: torch.device):
-    """Save PNG frames (GT | prediction) + an animated GIF for *sample*."""
-    (u0, traj_true) = sample
-    u0, traj_true = u0.to(device), traj_true.to(device)
+def inference(model: nn.Module, u0: torch.Tensor):
     model.eval()
     with torch.no_grad():
-        traj_pred = model(u0[None]).squeeze(0)          # (T, H, W)
+        return model(u0[None]).squeeze(0)          # (T, H, W)
+
+
+def get_prediction(model: nn.Module, u0: torch.Tensor, device: torch.device):
+    '''
+    u0:     initial conditions (to be predicted/inferenced)
+    traj:   full trajectories (ground truth)
+    '''
+    # u0 is (T, H, W)
+    u0 = u0.to(device)
+    # Start timer
+    t0 = torch_now(device)
+    model.eval()
+    traj_pred = inference(model, u0)
+    # Stop timer
+    t1 = torch_now(device)
+    print(f"Inference Time elapsed: {t1-t0}")
+
+    return traj_pred
+
+
+def save_frames_and_gif(T: int, save_dir: Path, traj_true: torch.Tensor, traj_pred: torch.Tensor):
+    """Save PNG frames (GT | prediction) + an animated GIF for *sample*."""
+
+    # --- save PNG frames ---
 
     frames_dir = save_dir / "frames";  frames_dir.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -190,7 +230,7 @@ def save_frames_and_gif(model: nn.Module, sample: tuple, T: int, save_dir: Path,
         fname = frames_dir / f"frame_{t:03d}.png"
         plt.savefig(fname, dpi=150);  plt.close()
         paths.append(fname)
-
+    
     # --- assemble GIF ---
     images = [imageio.imread(p) for p in paths]
     imageio.mimsave(save_dir / "trajectory.gif", images, duration=0.08)
@@ -218,20 +258,23 @@ def main():
     models_dir = out_root / "models";   models_dir.mkdir(exist_ok=True)
 
     rows = []
+    # Multiple Models per T (min, max, and steps)
     for T in range(args.t_min, args.t_max + 1, args.t_step):
         print(f"\n=====  T = {T}  =====")
 
         # ---------- dataset generation + timing ----------
+        # Total Dataset Generation + Initial Conditions
         t0 = torch_now(device)
-        u0_tensor, uT_tensor = gen_dataset(T, args.samples)
+        u0_tensor, uT_tensor = gen_dataset(T, args.samples, device=device)
         t_gen = torch_now(device) - t0
-        print(f"Dataset generated in {t_gen:.2f} s  ({args.samples} trajs × {T} steps)")
+        print(f"Dataset generated in {t_gen:.2f} s  ({args.samples} samples x {T} trajs (frames) x {DEF_T_INTERVAL} steps (time resolution))")
 
         # ---------- inference timing (tiny random network) ----------
         model_time = FNO(n_modes=(20,20), hidden_channels=HIDDEN_CHANNELS,
                          in_channels=1, out_channels=T).to(device).eval()
         x_dummy = torch.randn(args.batch, 1, DEF_NX, DEF_NY, device=device)
 
+        # Dry Run
         with torch.no_grad():                      # warm-up
             for _ in range(3):
                 _ = model_time(x_dummy)
@@ -257,19 +300,22 @@ def main():
             model = FNO(n_modes=(20,20), hidden_channels=64,
                         in_channels=1, out_channels=T).to(device)
 
-            print("Training FNO …")
+            print("Training FNO ...")
             train_fno(model, train_dl, val_dl, args.epochs, device, t_dir)
 
             # ---- save checkpoint ----
             ckpt_path = models_dir / f"fno_T_{T}.pth"
             torch.save(model.state_dict(), ckpt_path)
-            print(f"Saved model → {ckpt_path}")
+            print(f"Saved model -> {ckpt_path}")
 
             # ---- trajectory animation ----
             sample = next(iter(test_dl))  # one batch
-            (u0_b, traj_b) = sample
-            save_frames_and_gif(model, (u0_b[0], traj_b[0]), T, t_dir, device)
-            print("Animation written →", t_dir / "trajectory.gif")
+            u0, traj_true = sample
+            u0, traj_true = u0[0], traj_true[0]
+            traj_pred = get_prediction(model, u0=u0, device=device)
+            traj_true = traj_true.to(device)
+            save_frames_and_gif(T=T, save_dir=t_dir, traj_true=traj_true, traj_pred=traj_pred)
+            print("Animation written =>", t_dir / "trajectory.gif")
 
     # ===== global timing plot csv =====
     df = pd.DataFrame(rows)
@@ -280,7 +326,7 @@ def main():
     ax.plot(df["T"], df["dataset_sec"],  "o-", label="dataset generation")
     ax.plot(df["T"], df["inference_sec"], "s-", label="FNO inference")
     ax.set_xlabel("stored time‑steps  T")
-    ax.set_ylabel(f"seconds for {args.samples} samples (log‑scale)")
+    ax.set_ylabel(f"seconds for {args.samples} samples (log-scale)")
     ax.set_yscale("log")
     ax.grid(True, which="both", ls="--")
     ax.legend()
@@ -300,7 +346,7 @@ def main():
     fig_path = out_root / "benchmark_heat_dataset_vs_inference.png"
     plt.savefig(fig_path, dpi=200)
     plt.close()
-    print("\nSaved timing plot →", fig_path)
+    print("\nSaved timing plot ->", fig_path)
     print("All done!")
 
 
