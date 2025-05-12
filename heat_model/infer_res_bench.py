@@ -12,23 +12,24 @@ import matplotlib.pyplot as plt
 
 from neuralop.models import FNO
 
-from benchmark_heat import torch_now, gen_dataset, inference_loop, build_loaders, timing_plot
+from benchmark_heat import torch_now, gen_dataset, inference_loop, build_loaders, timing_plot, plot_loss_test
 
 # -------------------------- default hyper-parameters for datagen inferencing  --------------------------
-DEF_MIN_NXY, DEF_MAX_NXY, DEF_NXY_STEP = 16, 64, 8 # spatial resolution bounds
+DEF_MIN_NXY, DEF_MAX_NXY, DEF_NXY_STEP = 4, 160, 4 # spatial resolution bounds for datagen
 DEF_T           = 250                    # T is how many frames for gt & inference
-DEF_N_SAMPLES   = 500                   # trajectories per T (keep small => quick)
-DEF_N_EPOCHS    = 50                   # FNO training epochs
-DEF_BATCH_SIZE  = 1
-DEF_ALPHA       = 1e-3                  # lr
+DEF_N_SAMPLES   = 100                   # trajectories per T (keep small => quick)
+DEF_N_EPOCHS    = 100                   # FNO training epochs
+DEF_BATCH_SIZE  = 1                     # 1 = Stochastic, >1 = Batches
+DEF_ALPHA       = 1e-3                  # diffusion coefficient
 DEF_DT          = 0.01                  # physical timestep
 DEF_T_INTERVAL  = 500                    # total timesteps per frame
-HIDDEN_CHANNELS = 64
+HIDDEN_CHANNELS = 128
 # -----------------------------------------------------------------------------
 
 # -------------------------- parameters for loading model(s) --------------------------
 # Select Model(s)
 DEF_MIN_RES_MODEL, DEF_MAX_RES_MODEL, DEF_RES_STEP = 16, 64, 8 # spatial resolution bounds
+DEF_SAMPLES_MODEL   = 500 # Number of samples used to train the model
 
 # ===== main ==================================================================
 
@@ -73,8 +74,7 @@ def main(args):
             model = FNO(n_modes=(res_model, res_model), 
                         hidden_channels=HIDDEN_CHANNELS, 
                         in_channels=1, out_channels=DEF_T).to(device)
-            
-            ckpt_path = models_dir / f"fno_T_{DEF_T}_resolution_{res_model}_channels_{HIDDEN_CHANNELS}.pth"
+            ckpt_path = models_dir / f"resolution_{res_model}" / f"channels_{HIDDEN_CHANNELS}" / f"fno_T_{T}_samples_{DEF_SAMPLES_MODEL}_epochs_{args.epochs}.pth"
             model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
             print(f"Loaded model -> {ckpt_path}")
 
@@ -83,7 +83,7 @@ def main(args):
             t_dir.mkdir(parents=True)
     
             # ---- trajectory animation ----
-            t_inf = inference_loop(model, test_dl, t_dir, T, device)
+            t_inf, avg_loss = inference_loop(model, test_dl, t_dir, T, device)
             
             avg_t_data_gen = sum(t_gen)/len(t_gen)
             avg_t_inf = sum(t_inf)/len(t_inf)
@@ -93,10 +93,15 @@ def main(args):
                 results[res_model] = []
             
             # add to dataframe
-            results[res_model].append(dict(xy=xy, dataset_sec=avg_t_data_gen, inference_sec=avg_t_inf))
+            results[res_model].append(dict(xy=xy, dataset_sec=avg_t_data_gen, inference_sec=avg_t_inf, loss=avg_loss))
 
             # free up GPU memory
             del model
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect() # defragment the cache
+
+            # Programming like it's C :D
+            model = None
 
         # free up GPU memory
         del train_dl, val_dl, test_dl, u0_tensor, uT_tensor
@@ -111,6 +116,8 @@ def main(args):
         df.to_csv(t_dir / f"dataset_timings_xy_{args.xy_min}_{args.xy_max}_{args.xy_step}.csv", index=False)
         
         timing_plot(df=df, samples=args.samples, dir=t_dir, res=res_model)
+    plot_loss_test(results=results, save_dir=out_base, samples=args.samples)
+
 
     print("All done!")
 
