@@ -60,7 +60,7 @@ def generate_initial_condition(nx, ny, mode='mixed'):
 
 # === Generate a trajectory of solutions ===
 
-def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='mixed', boundary='neumann'):
+def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='mixed', boundary='neumann-safe'):
     if u is None: # u is the initial conditions for the heat trajectory (frame 0)
         u = generate_initial_condition(nx, ny, mode=mode)
         
@@ -86,6 +86,13 @@ def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='m
                     u[:, 0] = u[:, 1]
                     u[:, -1] = u[:, -2]
                     u += alpha * dt * lap
+                
+                case 'neumann-safe':
+                    u[1:-1,1:-1] += alpha * dt * lap[1:-1, 1:-1]
+                    u[0, :]   = u[1, :]
+                    u[-1, :]  = u[-2, :]
+                    u[:, 0]   = u[:, 1]
+                    u[:, -1]  = u[:, -2]
 
                 # Dirichlet boundary conditions
                 case 'dirichlet':
