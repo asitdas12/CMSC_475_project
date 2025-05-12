@@ -266,6 +266,52 @@ def generate_fokker_planck_autonomous():
     print("Dataset saved as fokker_planck_autonomous.pt")
 
 
+def fokker_planck_sine(): 
+    # Parameters
+    nx, ny = 32, 32         # Grid resolution
+    dx = dy = 1.0 / (nx - 1)   # Grid spacing
+    dt = 0.001                 # Time step
+    D = 0.01                   # Diffusion coefficient
+    num_steps = 10000            # Total time steps
+
+    # Create coordinate grid
+    x = np.linspace(0, 1, nx)
+    y = np.linspace(0, 1, ny)
+    X, Y = np.meshgrid(x, y, indexing='ij')
+
+    # Initial condition: 2D Gaussian blob
+    sigma = 0.05
+    p = 1 + 0.5 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
+    p /= np.sum(p) * dx * dy  # Normalize to integrate to 1
+
+    # Store solution snapshots
+    solution = np.zeros((num_steps, nx, ny), dtype=np.float32)
+    solution[0] = p
+
+    # Fokker-Planck evolution (pure diffusion using finite differences)
+    for t in range(1, num_steps):
+        laplacian = (
+            np.roll(p, 1, axis=0) + np.roll(p, -1, axis=0) +
+            np.roll(p, 1, axis=1) + np.roll(p, -1, axis=1) -
+            4 * p
+        ) / dx**2
+
+        p = p + D * dt * laplacian
+        p[p < 0] = 0  # avoid numerical negatives
+        p /= np.sum(p) * dx * dy  # renormalize
+        solution[t] = p
+
+    # Convert to PyTorch tensor and save
+    tensor_data = torch.tensor(solution)
+    torch.save(tensor_data, "./fokker_planck_data/fokker_planck_sine.pt")
+    print("Dataset saved to fokker_planck_sine.pt with shape:", tensor_data.shape)
+
+
+
+
+
+
+
 def generate_heat_graph():
 
     import networkx as nx
@@ -574,6 +620,8 @@ if __name__ == "__main__":
     fokker_planck()
     fp_dirichlet()
     generate_fokker_planck_autonomous()
+    fokker_planck_sine()
+
     generate_heat_graph()
     heston_joint_density()
     # solve_navier_stokes_2d()

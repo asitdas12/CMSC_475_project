@@ -35,6 +35,8 @@ def load_dataset(mode=""):
           data = torch.load("./fokker_planck_data/fokker_planck_dirichlet.pt")
      elif mode == "fokker_planck_autonomous": 
           data = torch.load("./fokker_planck_data/fokker_planck_autonomous.pt")
+     elif mode == "fokker_planck_sine": 
+          data = torch.load("./fokker_planck_data/fokker_planck_sine.pt")
      elif mode == "heat_graph": 
           data = torch.load("./heat_data/heat_graph.pt")
      elif mode == "heston_joint_density": 
@@ -80,7 +82,7 @@ def load_dataset(mode=""):
 
 # === Predict and Save Figures ===
 def main():
-     mode = "heston_joint_density"
+     mode = "fokker_planck_sine"
      # u0_tensor, uT_tensor = load_dataset()
      tensor_data = load_dataset(mode)
      # Prepare (input, target) pairs: (t) -> (t+1)
@@ -157,7 +159,7 @@ def main():
      scheduler = StepLR(optimizer, step_size=25, gamma=0.5)
      criterion = torch.nn.MSELoss()
 
-     if (1==0): 
+     if (1==1): # train new model or load existing model
           n_epochs = 50
           for epoch in tqdm(range(1, n_epochs + 1), desc = "Training"):
                model.train()
@@ -216,7 +218,7 @@ def main():
      # for i in range(5):
      #      plot_and_save_trajectory(x, y_true, y_pred, sample_idx=i, save_dir="figures", prefix="epoch_final")
 
-     def generate_ground_truth_gif(target_tensor, filename=f"./{mode}/{mode}_ground_truth.gif", steps=30, start_index=0):
+     def generate_ground_truth_gif(target_tensor, filename=f"./{mode}/{mode}_ground_truth.gif", steps=30, start_index=0, skip=0):
           # Set up figure
           fig, ax = plt.subplots()
           rcParams['animation.embed_limit'] = 2**128  # Increase limit if needed
@@ -248,7 +250,7 @@ def main():
           ani = animation.FuncAnimation(
                fig,
                update,
-               frames=range(0,steps,5), # skip frames here
+               frames=range(0,steps,skip), # skip frames here
                blit=True,
                repeat=False
           )
@@ -261,10 +263,10 @@ def main():
      if ("navier" in mode): 
           generate_ground_truth_gif(target_tensor=tensor_data, steps=100)
      else: 
-          generate_ground_truth_gif(target_tensor=tensor_data.unsqueeze(1), steps=1000)
+          generate_ground_truth_gif(target_tensor=tensor_data.unsqueeze(1), steps=10000, skip=20)
 
 
-     def generate_gif(model, start_input, steps=30, filename=f"./{mode}/{mode}_prediction.gif"):
+     def generate_gif(model, start_input, steps=30, filename=f"./{mode}/{mode}_prediction.gif", skip=0):
           model.eval()
           current = start_input.unsqueeze(0).to(device)  # shape: (1, 1, H, W)
           outputs = []
@@ -283,7 +285,6 @@ def main():
 
                     current = output  # autoregressive step
 
-          skip = 5
           outputs = outputs[::skip] # skip frames here
           
           # Create animation
@@ -318,7 +319,7 @@ def main():
      # quit()
      # #debug
 
-     generate_gif(model, sample_input, steps=1000)
+     generate_gif(model, sample_input, steps=10000, skip=20)
 
 
 
