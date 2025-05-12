@@ -32,9 +32,8 @@ Feel free to tweak hyper-parameters with command-line flags; run
 for details.
 """
 
-import argparse, time, math, shutil
+import time, math
 from pathlib import Path
-from datetime import datetime
 
 import numpy as np
 import torch, torch.nn as nn
@@ -45,22 +44,7 @@ import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 
 from dataGen import generate_initial_condition, generate_trajectory, save_dataset
-from neuralop.models import FNO
 
-
-# -------------------------- default hyper-parameters --------------------------
-DEF_N_SAMPLES   = 1000         # trajectories per T  (keep small ⇒ quick)
-DEF_T_MIN, DEF_T_MAX, DEF_T_STEP = 25, 500, 25 # T is how many frames for gt & inference
-DEF_N_SAMPLES   = 1000                   # trajectories per T (keep small => quick)
-DEF_N_EPOCHS    = 50                   # FNO training epochs
-DEF_BATCH_SIZE  = 32
-DEF_ALPHA       = 1e-3                  # lr
-DEF_NX = DEF_NY = 64                    # spatial resolution
-DEF_DX = DEF_DY = 1.0 / (DEF_NX - 1)
-HIDDEN_CHANNELS = 512
-DEF_DT          = 0.01                  # physical timestep
-DEF_T_INTERVAL  = 500                    # total timesteps per frame
-# -----------------------------------------------------------------------------
 
 # ===== helpers ===============================================================
 
@@ -76,7 +60,7 @@ def save_time(time, n_samples, T):
     df.to_csv(f"results/time-{T}-samples-{n_samples}.csv", index=False)
 
 
-def gen_dataset(T: int, n_samples: int, device):
+def gen_dataset(T: int, nx: int, ny: int, dx: float, dy: float, dt: float, alpha: float, nt: int, n_samples: int, device):
     """Generate *n_samples* full trajectories of length *T*.
 
     Returns two tensors:
@@ -86,12 +70,12 @@ def gen_dataset(T: int, n_samples: int, device):
     u0_all, traj_all = [], []
     times = []
     for sample in tqdm(range(n_samples), desc=f"Generating dataset for {n_samples} samples"):
-        init_condition = generate_initial_condition(DEF_NX, DEF_NY, mode="mixed")
+        init_condition = generate_initial_condition(nx, ny, mode="mixed")
         # Calculate the time for entire trajectory
         t0 = torch_now(device)
         u0, traj = generate_trajectory(
-            nx=DEF_NX, ny=DEF_NY, dx=DEF_DX, dy=DEF_DY, dt=DEF_DT, alpha=DEF_ALPHA,
-            nt=DEF_T_INTERVAL, n_frames=T, u=init_condition
+            nx=nx, ny=ny, dx=dx, dy=dy, dt=dt, alpha=alpha,
+            nt=nt, n_frames=T, u=init_condition
         )
         times.append(torch_now(device) - t0)
         
@@ -112,7 +96,7 @@ def gen_dataset(T: int, n_samples: int, device):
 
 
 def build_loaders(u0_tensor: torch.Tensor, uT_tensor: torch.Tensor,
-                  batch_size: int):
+                  batch_size: int, train=0.8, val=0.1):
     """Split dataset 80/10/10 and return PyTorch DataLoaders."""
     full_ds     = TensorDataset(u0_tensor, uT_tensor)
     n_total     = len(full_ds)
@@ -178,6 +162,7 @@ def train_fno(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader
         val_hist.append(val_loss)
 
         # scheduler.step()
+        tqdm.write(f"{epoch}, {n_epochs}, {train_loss}, {val_loss}")
         tqdm.write(f"    Epoch {epoch:02d}/{n_epochs} — train {train_loss:.2e}  val {val_loss:.2e}")
 
     # ---- plot loss history ----
@@ -257,123 +242,44 @@ def inference_loop(model, test_dl, t_dir, T, device):
     return times
 
 
-# ===== main ==================================================================
-
-def main():
-    parser = argparse.ArgumentParser(description="Benchmark + visualise FNO on the heat equation")
-    parser.add_argument("--t_min",  type=int, default=DEF_T_MIN)
-    parser.add_argument("--t_max",  type=int, default=DEF_T_MAX)
-    parser.add_argument("--t_step", type=int, default=DEF_T_STEP)
-    parser.add_argument("--samples",  "-N", type=int, default=DEF_N_SAMPLES)
-    parser.add_argument("--epochs",   "-E", type=int, default=DEF_N_EPOCHS)
-    parser.add_argument("--batch",    "-B", type=int, default=DEF_BATCH_SIZE)
-    parser.add_argument("--out",              default="results")
-    parser.add_argument("--no-train",   action="store_true", help="skip training/visualisation steps (speed plot only)")
-    parser.add_argument("--infer",      action="store_true", help="skip training step (inference only)")
-    args = parser.parse_args()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Running on {device};  started {datetime.now().isoformat(timespec='seconds')}")
-
-    out_root = Path(args.out);  out_root.mkdir(exist_ok=True)
-    models_dir = out_root / "models";   models_dir.mkdir(exist_ok=True)
-
-    rows = []
-    # Multiple Models per T (min, max, and steps)
-    for T in range(args.t_min, args.t_max + 1, args.t_step):
-        print(f"\n=====  T = {T}  =====")
-
-        # ---------- dataset generation + timing ----------
-        # Total Dataset Generation + Initial Conditions
+def dry_run(model, data, device, samples, batch_size):
+    with torch.no_grad():                      # warm-up
+        for _ in range(3):
+            _ = model(data)
         t0 = torch_now(device)
-        u0_tensor, uT_tensor, t_gen = gen_dataset(T, args.samples, device=device)
-        t1 = torch_now(device) - t0
-        print(f"Dataset generated in {t1:.2f} s  ({args.samples} samples x {T} trajs (frames) x {DEF_T_INTERVAL} steps (time resolution))")
-
-        # ---------- inference timing (tiny random network) ----------
-        model_time = FNO(n_modes=(20,20), hidden_channels=HIDDEN_CHANNELS,
-                         in_channels=1, out_channels=T).to(device).eval()
-        x_dummy = torch.randn(args.batch, 1, DEF_NX, DEF_NY, device=device)
-
-        # Dry Run
-        with torch.no_grad():                      # warm-up
-            for _ in range(3):
-                _ = model_time(x_dummy)
-        t0 = torch_now(device)
-        n_iter = math.ceil(args.samples / args.batch)
+        n_iter = math.ceil(samples / batch_size)
         with torch.no_grad():
             for _ in range(n_iter):
-                _ = model_time(x_dummy)
+                _ = model(data)
         t_inf = torch_now(device) - t0
         print(f"FNO inference (untrained) done in {t_inf:.4f} s")
 
-        del model_time, x_dummy
-        torch.cuda.empty_cache()
-        
-        # ---------- optional training / visualisation ----------
-        if not args.no_train:
-            t_dir = out_root / f"T_{T}"
-            if t_dir.exists():
-                shutil.rmtree(t_dir)
-            t_dir.mkdir(parents=True)
 
-            train_dl, val_dl, test_dl = build_loaders(u0_tensor, uT_tensor, args.batch)
-
-            model = FNO(n_modes=(20,20), hidden_channels=64,
-                        in_channels=1, out_channels=T).to(device)
-
-            print("Training FNO ...")
-            train_fno(model, train_dl, val_dl, args.epochs, device, t_dir)
-
-            # ---- save checkpoint ----
-            ckpt_path = models_dir / f"fno_T_{T}.pth"
-            torch.save(model.state_dict(), ckpt_path)
-            print(f"Saved model -> {ckpt_path}")
-
-            # ---- trajectory animation ----
-            t_inf = inference_loop(model, test_dl, t_dir, T, device)
-
-            # free up GPU memory
-            del model, train_dl, val_dl, test_dl, u0_tensor, uT_tensor
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect() # defragment the cache
-        
-        avg_t_data_gen = sum(t_gen)/len(t_gen)
-        avg_t_inf = sum(t_inf)/len(t_inf)
-        rows.append(dict(T=T, dataset_sec=avg_t_data_gen, inference_sec=avg_t_inf))
-
-    # ===== global timing plot csv =====
-    df = pd.DataFrame(rows)
-    df.to_csv(out_root / "timings.csv", index=False)
-
+def timing_plot(df, samples, dir, res):
     # ------- timing plot -------------------------------------------------
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(df["T"], df["dataset_sec"],  "o-", label="dataset generation")
-    ax.plot(df["T"], df["inference_sec"], "s-", label="FNO inference")
-    ax.set_xlabel("stored time-steps  T")
-    ax.set_ylabel(f"seconds for {args.samples} samples (log-scale)")
+    ax.plot(df["xy"], df["dataset_sec"],  "o-", label="Dataset Generation")
+    ax.plot(df["xy"], df["inference_sec"], "s-", label="FNO Inference")
+    ax.set_xlabel("Dataset Spatial Resolution")
+    ax.set_ylabel(f"seconds for {samples} samples (log-scale)")
     ax.set_yscale("log")
     ax.grid(True, which="both", ls="--")
+    ax.set_title(f"Inference Time vs Dataset Generation Time, Model Trained Dim ({res}x{res})")
     ax.legend()
 
     cross = df[df.inference_sec >= df.dataset_sec].head(1)
     if not cross.empty:
-        T_star = cross["T"].iloc[0]          # <─ pick the scalar safely
-        ax.axvline(T_star, color="grey", ls=":")
+        xy_star = cross["xy"].iloc[0]          # <- pick the scalar safely
+        ax.axvline(xy_star, color="grey", ls=":")
         ax.text(
-            T_star, ax.get_ylim()[1] * 0.5,
-            f"crossover\nT≈{T_star}",
+            xy_star, ax.get_ylim()[1] * 0.5,
+            f"crossover\nxy≈{xy_star}",
             ha="right", va="center", rotation=90,
             bbox=dict(fc="white", ec="grey", alpha=0.7),
         )
-
+    
     plt.tight_layout()
-    fig_path = out_root / "benchmark_heat_dataset_vs_inference.png"
+    fig_path = dir / f"benchmark_heat_dataset_vs_inference_model_{res}.png"
     plt.savefig(fig_path, dpi=200)
     plt.close()
     print("\nSaved timing plot ->", fig_path)
-    print("All done!")
-
-
-if __name__ == "__main__":
-    main()
