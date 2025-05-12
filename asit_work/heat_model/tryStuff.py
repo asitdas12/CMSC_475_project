@@ -80,7 +80,7 @@ def load_dataset(mode=""):
 
 # === Predict and Save Figures ===
 def main():
-     mode = "spectral_navier_stokes"
+     mode = "heston_joint_density"
      # u0_tensor, uT_tensor = load_dataset()
      tensor_data = load_dataset(mode)
      # Prepare (input, target) pairs: (t) -> (t+1)
@@ -248,7 +248,7 @@ def main():
           ani = animation.FuncAnimation(
                fig,
                update,
-               frames=steps,
+               frames=range(0,steps,5), # skip frames here
                blit=True,
                repeat=False
           )
@@ -261,7 +261,7 @@ def main():
      if ("navier" in mode): 
           generate_ground_truth_gif(target_tensor=tensor_data, steps=100)
      else: 
-          generate_ground_truth_gif(target_tensor=tensor_data.unsqueeze(1), steps=100)
+          generate_ground_truth_gif(target_tensor=tensor_data.unsqueeze(1), steps=1000)
 
 
      def generate_gif(model, start_input, steps=30, filename=f"./{mode}/{mode}_prediction.gif"):
@@ -283,6 +283,9 @@ def main():
 
                     current = output  # autoregressive step
 
+          skip = 5
+          outputs = outputs[::skip] # skip frames here
+          
           # Create animation
           fig, ax = plt.subplots()
           img_display = ax.imshow(outputs[0], cmap='hot')
@@ -315,7 +318,7 @@ def main():
      # quit()
      # #debug
 
-     generate_gif(model, sample_input, steps=100)
+     generate_gif(model, sample_input, steps=1000)
 
 
 

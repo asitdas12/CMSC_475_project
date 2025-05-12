@@ -112,7 +112,7 @@ def fokker_planck():
     dx = dy = 1.0 / (nx - 1)   # Grid spacing
     dt = 0.001                 # Time step
     D = 0.01                   # Diffusion coefficient
-    num_steps = 1000            # Total time steps
+    num_steps = 10000            # Total time steps
 
     # Create coordinate grid
     x = np.linspace(0, 1, nx)
@@ -121,6 +121,7 @@ def fokker_planck():
 
     # Initial condition: 2D Gaussian blob
     sigma = 0.05
+    # sigma = 0.001
     p = np.exp(-((X - 0.5)**2 + (Y - 0.5)**2) / (2 * sigma**2))
     p /= np.sum(p) * dx * dy  # Normalize to integrate to 1
 
@@ -575,5 +576,5 @@ if __name__ == "__main__":
     generate_fokker_planck_autonomous()
     generate_heat_graph()
     heston_joint_density()
-    solve_navier_stokes_2d()
-    spectral_navier_stokes()
+    # solve_navier_stokes_2d()
+    # spectral_navier_stokes()
