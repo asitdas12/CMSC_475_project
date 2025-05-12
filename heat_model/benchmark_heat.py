@@ -165,22 +165,50 @@ def train_fno(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader
         tqdm.write(f"{epoch}, {n_epochs}, {train_loss}, {val_loss}")
         tqdm.write(f"    Epoch {epoch:02d}/{n_epochs} — train {train_loss:.2e}  val {val_loss:.2e}")
 
-    # ---- plot loss history ----
-    plt.figure(figsize=(4,3))
-    plt.plot(train_hist, label="train")
-    plt.plot(val_hist,   label="val")
-    plt.yscale("log");  plt.xlabel("epoch");  plt.ylabel("MSE loss")
-    plt.legend();   plt.tight_layout()
-    plt.savefig(save_dir / "loss_curve.png", dpi=200)
-    plt.close()
+        plot_loss(train_hist=train_hist, val_hist=val_hist, save_dir=save_dir)
 
     return train_hist, val_hist
 
 
-def save_frames_and_gif(T, save_dir, traj_true, traj_pred,
+def plot_loss(train_hist=[], val_hist=[], save_dir=Path(".")):
+    path = save_dir / "loss_curve.png"
+    # ---- plot loss history ----
+    plt.figure(figsize=(4,3))
+    if train_hist:  plt.plot(train_hist, label="train")
+    if val_hist:    plt.plot(val_hist,   label="val")
+    plt.yscale("log");  plt.xlabel("epoch");  plt.ylabel("MSE loss")
+    plt.legend();   plt.tight_layout()
+    plt.savefig(path, dpi=200)
+    plt.close()
+
+    print(f"Saved loss curve plot to: {path}")
+
+
+def plot_loss_test(results, save_dir=Path("."), samples=None):
+    path = save_dir / "test_loss_curve.png"
+    # ---- plot test loss history ----
+    plt.figure(figsize=(4,3))
+    # TODO: Plot loss for all models in a for loop
+    for res_model, rows in results.items():
+        df = pd.DataFrame(rows)
+        plt.plot(df['xy'], df['loss'],  label=f"model-{res_model}x{res_model}")
+    plt.yscale("log");  plt.xlabel("test set resolution");  plt.ylabel("Avg. MSE loss")
+    plt.title(f"Mean Test Loss vs Test Set Resolution ({samples} samples)")
+    plt.legend();   plt.tight_layout()
+    plt.savefig(path, dpi=200)
+    plt.close()
+
+    print(f"Saved test loss curve plot to: {path}")
+
+def save_frames_and_gif(T, save_dir=Path("."), model=None, traj_true=None, traj_pred=None,
                              duration=0.08, cmap_name="inferno"):
     frames_dir = save_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
+
+    if traj_true is not None and traj_true.ndim == 4:
+        traj_true = traj_true[0]
+    if traj_pred is not None and traj_pred.ndim == 4:
+        traj_pred = traj_pred[0]
 
     # --- one figure reused for all frames ----------------------------------
     fig, axs = plt.subplots(1, 2, figsize=(5, 2.4))
@@ -200,7 +228,7 @@ def save_frames_and_gif(T, save_dir, traj_true, traj_pred,
         for t in range(T):
             ims[0].set_data(traj_true[t].cpu())
             ims[1].set_data(traj_pred[t].cpu())
-            txt0.set_text(f"GT  t={t}")
+            txt0.set_text(f"True Trajectory  t={t}")
 
             fig.canvas.draw()                       # render once
             buf_rgba = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
@@ -215,9 +243,11 @@ def save_frames_and_gif(T, save_dir, traj_true, traj_pred,
 
 
 def inference_loop(model, test_dl, t_dir, T, device):
-    model.eval()
+    criterion  = nn.MSELoss()
+
     times = []
 
+    model.eval(); test_loss = 0.0
     with torch.no_grad():
         for batch_idx, (u0, traj_true) in enumerate(tqdm(test_dl)):
             u0, traj_true = u0.to(device), traj_true.to(device)
@@ -228,6 +258,8 @@ def inference_loop(model, test_dl, t_dir, T, device):
 
             times.append(t1 - t0)
 
+            test_loss += criterion(traj_pred, traj_true).item()
+
             # save GIF for the *first* item of the *first* batch only
             if batch_idx == 0:
                 save_frames_and_gif(
@@ -236,10 +268,15 @@ def inference_loop(model, test_dl, t_dir, T, device):
                     traj_pred=traj_pred[0]
                 )
 
-    print(f"Avg. inference time per batch: {sum(times)/len(times):.4f} s")
-    print(f"Batch Time: {times}")
+    # Compute average test loss
+    test_loss /= len(test_dl)
 
-    return times
+    print(f"Average Test loss: {test_loss:.2e}")
+
+    print(f"Avg. inference time per batch: {sum(times)/len(times):.4f} s")
+    # print(f"Batch Time: {times}")
+
+    return times, test_loss
 
 
 def dry_run(model, data, device, samples, batch_size):
@@ -255,7 +292,7 @@ def dry_run(model, data, device, samples, batch_size):
         print(f"FNO inference (untrained) done in {t_inf:.4f} s")
 
 
-def timing_plot(df, samples, dir, res):
+def timing_plot(df, samples, dir, res, channel=None):
     # ------- timing plot -------------------------------------------------
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(df["xy"], df["dataset_sec"],  "o-", label="Dataset Generation")
