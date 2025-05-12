@@ -14,12 +14,12 @@ from benchmark_heat import torch_now, gen_dataset, inference_loop, build_loaders
 DEF_MIN_NXY, DEF_MAX_NXY, DEF_NXY_STEP = 16, 64, 8 # spatial resolution bounds
 DEF_T           = 250                    # T is how many frames for gt & inference
 DEF_N_SAMPLES   = 500                   # trajectories per T (keep small => quick)
-DEF_N_EPOCHS    = 50                   # FNO training epochs
+DEF_N_EPOCHS    = 100                   # FNO training epochs
 DEF_BATCH_SIZE  = 32
 DEF_ALPHA       = 1e-3                  # lr
 DEF_DT          = 0.01                  # physical timestep
 DEF_T_INTERVAL  = 500                    # total timesteps per frame
-HIDDEN_CHANNELS = 64
+HIDDEN_CHANNELS = 128
 # -----------------------------------------------------------------------------
 
 # -------------------------- parameters for inference --------------------------
@@ -87,37 +87,49 @@ def main(args):
             train_fno(model, train_dl, val_dl, args.epochs, device, t_dir)
 
             # ---- save checkpoint ----
-            ckpt_path = models_dir / f"fno_T_{T}_resolution_{xy}_channels_{HIDDEN_CHANNELS}.pth"
-            torch.save(model.state_dict(), ckpt_path)
+            ckpt_path = models_dir / f"resolution_{xy}" / f"channels_{HIDDEN_CHANNELS}"
+
+            if ckpt_path.exists():
+                shutil.rmtree(ckpt_path)
+            ckpt_path.mkdir(parents=True)
+
+            torch.save(model.state_dict(), ckpt_path / f"fno_T_{T}_samples_{args.samples}_epochs_{args.epochs}.pth")
             print(f"Saved model -> {ckpt_path}")
 
         else: # Load pretrained model
             t_dir = out_root / f"T_{DEF_T_MODEL}_resolution_{DEF_RES_MODEL}_channels_{DEF_HIDDEN_CHANNELS_MODEL}"
+
             model = FNO(n_modes=(DEF_RES_MODEL,DEF_RES_MODEL), 
                         hidden_channels=DEF_HIDDEN_CHANNELS_MODEL, 
                         in_channels=1, out_channels=DEF_T_MODEL).to(device)
-            ckpt_path = models_dir / f"fno_T_{DEF_T_MODEL}_resolution_{DEF_RES_MODEL}_channels_{DEF_HIDDEN_CHANNELS_MODEL}.pth"
+            
+            # checkpoint path to load pretrained model
+            ckpt_path = models_dir / f"resolution_{DEF_RES_MODEL}" / f"channels_{HIDDEN_CHANNELS}" / f"fno_T_{T}_samples_{args.samples}_epochs_{args.epochs}.pth"
+
+            # load
             model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
             print(f"Loaded model -> {ckpt_path}")
 
+            # create output dir
             if t_dir.exists():
                 shutil.rmtree(t_dir)
             t_dir.mkdir(parents=True)
 
+        # If we want to inference on the entire dataset (stochastically)
         if args.stochastic:
             del train_dl, val_dl, test_dl
             train_dl, val_dl, test_dl = build_loaders(u0_tensor, uT_tensor, batch_size=1, train=0, val=0) # set batch size to 1 and entire dataset as test
     
         # ---- trajectory animation ----
-        t_inf = inference_loop(model, test_dl, t_dir, T, device)
+        t_inf, _ = inference_loop(model, test_dl, t_dir, T, device)
 
         # free up GPU memory
         del model, train_dl, val_dl, test_dl, u0_tensor, uT_tensor
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect() # defragment the cache
         
-        avg_t_data_gen = sum(t_gen)/len(t_gen)
-        avg_t_inf = sum(t_inf)/len(t_inf)
+        avg_t_data_gen  = sum(t_gen)/len(t_gen)
+        avg_t_inf       = sum(t_inf)/len(t_inf)
         rows.append(dict(xy=xy, dataset_sec=avg_t_data_gen, inference_sec=avg_t_inf))
 
     out_base = out_root / "train" if not args.no_train else "inference"
