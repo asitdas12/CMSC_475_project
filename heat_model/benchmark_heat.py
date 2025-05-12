@@ -43,6 +43,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 
+import gc
+
 from dataGen import generate_initial_condition, generate_trajectory, save_dataset
 
 
@@ -165,7 +167,12 @@ def train_fno(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader
         tqdm.write(f"{epoch}, {n_epochs}, {train_loss}, {val_loss}")
         tqdm.write(f"    Epoch {epoch:02d}/{n_epochs} — train {train_loss:.2e}  val {val_loss:.2e}")
 
-        plot_loss(train_hist=train_hist, val_hist=val_hist, save_dir=save_dir)
+    del optimizer, scheduler
+    gc.collect()
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    torch.cuda.ipc_collect() # defragment the cache
+    plot_loss(train_hist=train_hist, val_hist=val_hist, save_dir=save_dir)
 
     return train_hist, val_hist
 
@@ -187,7 +194,7 @@ def plot_loss(train_hist=[], val_hist=[], save_dir=Path(".")):
 def plot_loss_test(results, save_dir=Path("."), samples=None):
     path = save_dir / "test_loss_curve.png"
     # ---- plot test loss history ----
-    plt.figure(figsize=(4,3))
+    plt.figure(figsize=(12,9))
     # TODO: Plot loss for all models in a for loop
     for res_model, rows in results.items():
         df = pd.DataFrame(rows)

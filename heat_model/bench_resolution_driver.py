@@ -2,6 +2,8 @@ import argparse, shutil
 from pathlib import Path
 from datetime import datetime
 
+import gc
+
 import torch
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,7 +13,7 @@ from neuralop.models import FNO
 from benchmark_heat import torch_now, gen_dataset, inference_loop, build_loaders, train_fno, dry_run
 
 # -------------------------- default hyper-parameters --------------------------
-DEF_MIN_NXY, DEF_MAX_NXY, DEF_NXY_STEP = 16, 64, 8 # spatial resolution bounds
+DEF_MIN_NXY, DEF_MAX_NXY, DEF_NXY_STEP = 8, 64, 8 # spatial resolution bounds
 DEF_T           = 250                    # T is how many frames for gt & inference
 DEF_N_SAMPLES   = 500                   # trajectories per T (keep small => quick)
 DEF_N_EPOCHS    = 100                   # FNO training epochs
@@ -125,6 +127,8 @@ def main(args):
 
         # free up GPU memory
         del model, train_dl, val_dl, test_dl, u0_tensor, uT_tensor
+        gc.collect()
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect() # defragment the cache
         

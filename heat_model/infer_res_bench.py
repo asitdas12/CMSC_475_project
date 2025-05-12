@@ -6,6 +6,8 @@ import argparse, shutil
 from pathlib import Path
 from datetime import datetime
 
+import gc
+
 import torch
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -28,7 +30,7 @@ HIDDEN_CHANNELS = 128
 
 # -------------------------- parameters for loading model(s) --------------------------
 # Select Model(s)
-DEF_MIN_RES_MODEL, DEF_MAX_RES_MODEL, DEF_RES_STEP = 16, 64, 8 # spatial resolution bounds
+DEF_MIN_RES_MODEL, DEF_MAX_RES_MODEL, DEF_RES_STEP = 8, 64, 8 # spatial resolution bounds
 DEF_SAMPLES_MODEL   = 500 # Number of samples used to train the model
 
 # ===== main ==================================================================
@@ -97,6 +99,7 @@ def main(args):
 
             # free up GPU memory
             del model
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect() # defragment the cache
 
@@ -105,6 +108,8 @@ def main(args):
 
         # free up GPU memory
         del train_dl, val_dl, test_dl, u0_tensor, uT_tensor
+        gc.collect()
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect() # defragment the cache
 
