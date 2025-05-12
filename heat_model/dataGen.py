@@ -14,9 +14,9 @@ def random_gaussian_sum(nx, ny, num_blobs=3):
     X, Y = np.meshgrid(x, y, indexing='ij')
     u0 = np.zeros((nx, ny))
     for _ in range(np.random.randint(1, num_blobs + 1)):
-        xc, yc = np.random.rand(2) * 0.8 + 0.1
-        sigma = np.random.rand() * 0.05 + 0.02
-        amp = np.random.rand() * 2.5
+        xc, yc  = np.random.rand(2) * 0.8 + 0.1
+        sigma   = np.random.rand() * 0.05 + 0.02
+        amp     = np.random.rand() * 2.5
         u0 += amp * np.exp(-((X - xc)**2 + (Y - yc)**2) / (2 * sigma**2))
     return u0
 
@@ -25,9 +25,9 @@ def checkerboard_pattern(nx, ny, num_waves=4):
     X, Y = np.meshgrid(x, y, indexing='ij')
     u0 = np.zeros((nx, ny))
     for _ in range(np.random.randint(1, num_waves + 1)):
-        fx, fy = np.random.randint(1, 10, size=2)
-        phase = np.random.rand() * 2 * np.pi
-        amp = np.random.rand() * 2.5
+        fx, fy  = np.random.randint(1, 10, size=2)
+        phase   = np.random.rand() * 2 * np.pi
+        amp     = np.random.rand() * 2.5
         u0 += amp * np.sin(2 * np.pi * fx * X + phase) * np.sin(2 * np.pi * fy * Y + phase)
     return u0
 
@@ -40,26 +40,27 @@ def spotty_noise(nx, ny, num_spots=100, smooth_sigma=1.5):
     return gaussian_filter(u0, sigma=smooth_sigma)
 
 def generate_initial_condition(nx, ny, mode='mixed'):
-    if mode == 'gaussian':
-        return random_gaussian_sum(nx, ny)
-    elif mode == 'checkerboard':
-        return checkerboard_pattern(nx, ny)
-    elif mode == 'spotty':
-        return spotty_noise(nx, ny)
-    elif mode == 'mixed':
-        u_gaussian = random_gaussian_sum(nx, ny)
-        u_checkerboard = checkerboard_pattern(nx, ny)
-        u_spotty = spotty_noise(nx, ny)
-        return (u_gaussian + u_checkerboard + u_spotty) / 3
-    elif mode == 'random':
-        pattern = np.random.choice(['gaussian', 'checkerboard', 'spotty']) 
-        return generate_initial_condition(nx, ny, mode=pattern)
-    else:
-        raise ValueError(f"Invalid mode: {mode}")
+    match mode:
+        case 'gaussian':
+            return random_gaussian_sum(nx, ny)
+        case 'checkerboard':
+            return checkerboard_pattern(nx, ny)
+        case 'spotty':
+            return spotty_noise(nx, ny)
+        case 'mixed':
+            u_gaussian = random_gaussian_sum(nx, ny)
+            u_checkerboard = checkerboard_pattern(nx, ny)
+            u_spotty = spotty_noise(nx, ny)
+            return (u_gaussian + u_checkerboard + u_spotty) / 3
+        case 'random':
+            pattern = np.random.choice(['gaussian', 'checkerboard', 'spotty']) 
+            return generate_initial_condition(nx, ny, mode=pattern)
+        case _ :
+            raise ValueError(f"Invalid mode: {mode}")
 
 # === Generate a trajectory of solutions ===
 
-def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='mixed', boundary='neumann'):
+def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='mixed', boundary='neumann-safe'):
     if u is None: # u is the initial conditions for the heat trajectory (frame 0)
         u = generate_initial_condition(nx, ny, mode=mode)
         
@@ -85,6 +86,13 @@ def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='m
                     u[:, 0] = u[:, 1]
                     u[:, -1] = u[:, -2]
                     u += alpha * dt * lap
+                
+                case 'neumann-safe':
+                    u[1:-1,1:-1] += alpha * dt * lap[1:-1, 1:-1]
+                    u[0, :]   = u[1, :]
+                    u[-1, :]  = u[-2, :]
+                    u[:, 0]   = u[:, 1]
+                    u[:, -1]  = u[:, -2]
 
                 # Dirichlet boundary conditions
                 case 'dirichlet':
