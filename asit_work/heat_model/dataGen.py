@@ -307,11 +307,6 @@ def fokker_planck_sine():
     print("Dataset saved to fokker_planck_sine.pt with shape:", tensor_data.shape)
 
 
-
-
-
-
-
 def generate_heat_graph():
 
     import networkx as nx
@@ -336,6 +331,15 @@ def generate_heat_graph():
     u = torch.zeros(n_nodes)
     center_node = n_nodes // 2
     u[center_node] = 1.0
+
+    # ring initial condition
+    # x = torch.arange(nn_x).float()
+    # y = torch.arange(nn_y).float()
+    # X, Y = torch.meshgrid(x, y, indexing='ij')
+    # cx, cy = nn_x // 2, nn_y // 2
+    # dist = torch.sqrt((X - cx)**2 + (Y - cy)**2)
+    # ring = ((dist >= radius - 0.5) & (dist <= radius + 0.5)).float()
+    # u = ring.flatten()
 
     # Time parameters
     dt = 0.01
@@ -405,69 +409,154 @@ def heston_joint_density():
     print("Saved to heston_joint_density.pt with shape:", tensor_data.shape)
 
 
-def solve_navier_stokes_2d(N=64, T=10.0, dt=0.01, ν=0.001):
+# def solve_navier_stokes_2d(N=64, T=10.0, dt=0.01, ν=0.001):
+    # import numpy as np
+    # from scipy.fftpack import fft2, ifft2, fftfreq
+    # import os
+    # os.chdir(os.path.dirname(__file__))
+    
+    # L = 2 * np.pi
+    # x = np.linspace(0, L, N, endpoint=False)
+    # y = np.linspace(0, L, N, endpoint=False)
+    # X, Y = np.meshgrid(x, y)
+
+    # # Initial condition: Taylor-Green vortex
+    # u = np.sin(X) * np.cos(Y)
+    # v = -np.cos(X) * np.sin(Y)
+
+    # # Fourier wave numbers
+    # kx = fftfreq(N, 1.0 / N)
+    # ky = fftfreq(N, 1.0 / N)
+    # kx, ky = np.meshgrid(kx, ky)
+    # ksq = kx**2 + ky**2
+    # ksq[0, 0] = 1  # avoid division by zero
+
+    # # Initialize velocity fields in Fourier space
+    # u_hat = fft2(u)
+    # v_hat = fft2(v)
+
+    # steps = int(T / dt)
+    # results = []
+
+    # for _ in range(steps):
+    #     u = np.real(ifft2(u_hat))
+    #     v = np.real(ifft2(v_hat))
+
+    #     u_x = np.real(ifft2(1j * kx * u_hat))
+    #     u_y = np.real(ifft2(1j * ky * u_hat))
+    #     v_x = np.real(ifft2(1j * kx * v_hat))
+    #     v_y = np.real(ifft2(1j * ky * v_hat))
+
+    #     nonlinear_u = u * u_x + v * u_y
+    #     nonlinear_v = u * v_x + v * v_y
+
+    #     nonlinear_u_hat = fft2(nonlinear_u)
+    #     nonlinear_v_hat = fft2(nonlinear_v)
+
+    #     div_hat = 1j * kx * nonlinear_u_hat + 1j * ky * nonlinear_v_hat
+    #     pressure_hat = div_hat / ksq
+
+    #     u_hat -= dt * (nonlinear_u_hat - 1j * kx * pressure_hat + ν * ksq * u_hat)
+    #     v_hat -= dt * (nonlinear_v_hat - 1j * ky * pressure_hat + ν * ksq * v_hat)
+
+    #     if _ % 10 == 0:
+    #         results.append((np.real(ifft2(u_hat)), np.real(ifft2(v_hat))))
+
+    # # return np.stack(results)  # shape: [T, N, N, 2]
+
+    # data = np.stack(results)
+    # data = data.astype(np.float32)
+    # # np.save("navier_stokes_data.npy", data)
+
+    # # Convert to PyTorch tensor and save
+    # tensor_data = torch.from_numpy(data)
+    # torch.save(tensor_data, "./navier_stokes_data/navier_stokes_2d.pt")
+    # print("Dataset saved to navier_stokes_2d.pt with shape:", tensor_data.shape)
+
+
+
+def solve_navier_stokes_2d(N=64, T=10.0, dt=0.01, ν=0.001, save_path="./navier_stokes_data/navier_stokes_2d.pt"):
     import numpy as np
+    import torch
     from scipy.fftpack import fft2, ifft2, fftfreq
     import os
-    os.chdir(os.path.dirname(__file__))
-    
+    # Domain setup
     L = 2 * np.pi
     x = np.linspace(0, L, N, endpoint=False)
     y = np.linspace(0, L, N, endpoint=False)
-    X, Y = np.meshgrid(x, y)
+    X, Y = np.meshgrid(x, y, indexing='ij')
 
     # Initial condition: Taylor-Green vortex
     u = np.sin(X) * np.cos(Y)
     v = -np.cos(X) * np.sin(Y)
 
     # Fourier wave numbers
-    kx = fftfreq(N, 1.0 / N)
-    ky = fftfreq(N, 1.0 / N)
-    kx, ky = np.meshgrid(kx, ky)
+    kx = fftfreq(N, 1.0 / N) * 2 * np.pi / L
+    ky = fftfreq(N, 1.0 / N) * 2 * np.pi / L
+    kx, ky = np.meshgrid(kx, ky, indexing='ij')
     ksq = kx**2 + ky**2
     ksq[0, 0] = 1  # avoid division by zero
 
-    # Initialize velocity fields in Fourier space
+    # Fourier transforms of velocity
     u_hat = fft2(u)
     v_hat = fft2(v)
 
     steps = int(T / dt)
     results = []
 
-    for _ in range(steps):
+    def dealias(f_hat):
+        """Apply 2/3 dealiasing rule."""
+        cutoff = N // 3
+        f_hat[cutoff:-cutoff, :] = 0
+        f_hat[:, cutoff:-cutoff] = 0
+        return f_hat
+
+    for step in range(steps):
         u = np.real(ifft2(u_hat))
         v = np.real(ifft2(v_hat))
 
+        # Gradients in Fourier space
         u_x = np.real(ifft2(1j * kx * u_hat))
         u_y = np.real(ifft2(1j * ky * u_hat))
         v_x = np.real(ifft2(1j * kx * v_hat))
         v_y = np.real(ifft2(1j * ky * v_hat))
 
+        # Nonlinear terms
         nonlinear_u = u * u_x + v * u_y
         nonlinear_v = u * v_x + v * v_y
 
         nonlinear_u_hat = fft2(nonlinear_u)
         nonlinear_v_hat = fft2(nonlinear_v)
 
+        # Optional: apply dealiasing to nonlinear terms
+        nonlinear_u_hat = dealias(nonlinear_u_hat)
+        nonlinear_v_hat = dealias(nonlinear_v_hat)
+
+        # Project out divergence
         div_hat = 1j * kx * nonlinear_u_hat + 1j * ky * nonlinear_v_hat
-        pressure_hat = div_hat / ksq
+        nonlinear_u_hat -= kx * div_hat / ksq
+        nonlinear_v_hat -= ky * div_hat / ksq
 
-        u_hat -= dt * (nonlinear_u_hat - 1j * kx * pressure_hat + ν * ksq * u_hat)
-        v_hat -= dt * (nonlinear_v_hat - 1j * ky * pressure_hat + ν * ksq * v_hat)
+        # Time stepping (forward Euler)
+        u_hat -= dt * (nonlinear_u_hat + ν * ksq * u_hat)
+        v_hat -= dt * (nonlinear_v_hat + ν * ksq * v_hat)
 
-        if _ % 10 == 0:
-            results.append((np.real(ifft2(u_hat)), np.real(ifft2(v_hat))))
+        # Store results every 10 steps
+        if step % 10 == 0:
+            u_real = np.real(ifft2(u_hat))
+            v_real = np.real(ifft2(v_hat))
+            results.append(np.stack([u_real, v_real], axis=0))  # shape: [2, N, N]
 
-    # return np.stack(results)  # shape: [T, N, N, 2]
-
-    data = np.stack(results)
-    data = data.astype(np.float32)
-    # np.save("navier_stokes_data.npy", data)
-
-    # Convert to PyTorch tensor and save
+    # Stack results to tensor: shape [T', 2, N, N]
+    data = np.stack(results).astype(np.float32)
     tensor_data = torch.from_numpy(data)
-    torch.save(tensor_data, "./navier_stokes_data/navier_stokes_2d.pt")
-    print("Dataset saved to navier_stokes_2d.pt with shape:", tensor_data.shape)
+
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    torch.save(tensor_data, save_path)
+    print(f"Dataset saved to {save_path} with shape:", tensor_data.shape)
+
+
 
 
 def spectral_navier_stokes(): 
@@ -624,5 +713,5 @@ if __name__ == "__main__":
 
     generate_heat_graph()
     heston_joint_density()
-    # solve_navier_stokes_2d()
+    solve_navier_stokes_2d()
     # spectral_navier_stokes()

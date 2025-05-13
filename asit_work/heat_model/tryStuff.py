@@ -82,7 +82,7 @@ def load_dataset(mode=""):
 
 # === Predict and Save Figures ===
 def main():
-     mode = "fokker_planck_sine"
+     mode = "navier_stokes_2d"
      # u0_tensor, uT_tensor = load_dataset()
      tensor_data = load_dataset(mode)
      # Prepare (input, target) pairs: (t) -> (t+1)
@@ -218,7 +218,7 @@ def main():
      # for i in range(5):
      #      plot_and_save_trajectory(x, y_true, y_pred, sample_idx=i, save_dir="figures", prefix="epoch_final")
 
-     def generate_ground_truth_gif(target_tensor, filename=f"./{mode}/{mode}_ground_truth.gif", steps=30, start_index=0, skip=0):
+     def generate_ground_truth_gif(target_tensor, filename=f"./{mode}/{mode}_ground_truth.gif", steps=30, start_index=0, skip=1):
           # Set up figure
           fig, ax = plt.subplots()
           rcParams['animation.embed_limit'] = 2**128  # Increase limit if needed
@@ -261,12 +261,12 @@ def main():
           print(f"Ground truth GIF saved as: {filename}")
 
      if ("navier" in mode): 
-          generate_ground_truth_gif(target_tensor=tensor_data, steps=100)
+          generate_ground_truth_gif(target_tensor=tensor_data, steps=100, skip=1)
      else: 
           generate_ground_truth_gif(target_tensor=tensor_data.unsqueeze(1), steps=10000, skip=20)
 
 
-     def generate_gif(model, start_input, steps=30, filename=f"./{mode}/{mode}_prediction.gif", skip=0):
+     def generate_gif(model, start_input, steps=30, filename=f"./{mode}/{mode}_prediction.gif", skip=1):
           model.eval()
           current = start_input.unsqueeze(0).to(device)  # shape: (1, 1, H, W)
           outputs = []
@@ -319,7 +319,7 @@ def main():
      # quit()
      # #debug
 
-     generate_gif(model, sample_input, steps=10000, skip=20)
+     generate_gif(model, sample_input, steps=100, skip=1)
 
 
 
