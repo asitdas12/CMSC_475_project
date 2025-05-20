@@ -28,11 +28,11 @@ HIDDEN_CHANNELS = 128
 # -------------------------- parameters for loading model(s) (inference) --------------------------
 # Select Model(s)
 DEF_T_MIN, DEF_T_MAX, DEF_T_STEP = 25, 200, 5 # Use timesteps between MIN and MAX (models)
-DEF_MODEL_N = 250                               # Number of samples the model was trained on
+DEF_MODEL_N = 500                               # Number of samples the model was trained on
 # ------------------------------------------------------------------------------
 
 # -------------------------- option for training --------------------------
-DEF_NO_TRAIN = False
+DEF_NO_TRAIN = True
 
 
 # Train
