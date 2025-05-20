@@ -41,5 +41,6 @@ Thumbs.db
 ###################
 __pycache__/
 *.pt
-/heat_model/results
 /heat_model/animations
+/heat_model/results/resolution/models
+/heat_model/results/timestep/models

@@ -89,8 +89,8 @@ def gen_dataset(T: int, nx: int, ny: int, dx: float, dy: float, dt: float, alpha
     u0_tensor = torch.tensor(np.stack(u0_all)[:, None], dtype=torch.float32)
     uT_tensor = torch.tensor(np.stack(traj_all),       dtype=torch.float32)
 
-    save_dataset(u0_tensor, uT_tensor)
-    save_time(times, n_samples, T)
+    # save_dataset(u0_tensor, uT_tensor)
+    # save_time(times, n_samples, T)
 
     print(f"Average time per trajectory: {np.mean(times):.4f} s")
 
@@ -327,3 +327,4 @@ def timing_plot(df, samples, dir, res, channel=None):
     plt.savefig(fig_path, dpi=200)
     plt.close()
     print("\nSaved timing plot ->", fig_path)
+    
