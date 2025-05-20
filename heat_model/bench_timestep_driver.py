@@ -11,7 +11,7 @@ from neuralop.models import FNO
 from benchmark_heat import torch_now, gen_dataset, inference_loop, build_loaders, train_fno, dry_run
 
 # -------------------------- default hyper-parameters --------------------------
-DEF_N_SAMPLES   = 1000         # trajectories per T  (keep small ⇒ quick)
+DEF_N_SAMPLES   = 1000         # trajectories per T  (keep small => quick)
 DEF_T_MIN, DEF_T_MAX, DEF_T_STEP = 25, 25, 25 # T is how many frames for gt & inference
 DEF_N_SAMPLES   = 1000                   # trajectories per T (keep small => quick)
 DEF_N_EPOCHS    = 50                   # FNO training epochs
