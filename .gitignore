@@ -44,3 +44,5 @@ __pycache__/
 /heat_model/animations
 /heat_model/results/resolution/models
 /heat_model/results/timestep/models
+
+*trajectory.gif
