@@ -1,37 +1,4 @@
 # benchmark_heat.py
-"""
-Extended benchmark script for the 2-D heat-equation example
-===========================================================
-
-This script now performs *three* tasks for a sweep of stored
- time-steps **T = 5 ... 200** (step 5):
-
-1. **Speed benchmark** ― wall-clock seconds required to
-   • generate *N_SAMPLES* trajectories (traditional FD solver), and
-   • run the same number of forward passes through an *FNO* model.
-   Both curves are plotted on a log-scale and the first
-   crossover point is annotated.
-
-2. **Model training + evaluation** ― for every *T* a small FNO
-   (unnecessarily small for scientific usage but fast enough for a
-   demonstrator) is trained for *N_EPOCHS* on a freshly generated
-   dataset (80 %/10 %/10 % split).  A loss-history plot is saved to
-   *results/T_XX/loss_curve.png*.
-
-3. **Trajectory visualisation** ― for the first test sample we
-   predict an entire trajectory and save two-panel frames
-   (ground-truth | prediction) for every stored step.  The frames are
-   bundled into an animated GIF *trajectory.gif* using **imageio**.
-
-All artefacts live below *results/T_XX/*, and an extra *models/*
-folder keeps a checkpoint *fno_T_XX.pth* for each time-horizon.
-Feel free to tweak hyper-parameters with command-line flags; run
-
-    python benchmark_heat.py --help
-
-for details.
-"""
-
 import time, math
 from pathlib import Path
 

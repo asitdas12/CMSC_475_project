@@ -1,7 +1,3 @@
-# This file runs after we train a model
-# and want to see how well it generalizes
-# to data with different dimensions and initial conditions
-
 import argparse, shutil
 from pathlib import Path
 from datetime import datetime
@@ -17,21 +13,22 @@ from neuralop.models import FNO
 from benchmark_heat import torch_now, gen_dataset, inference_loop, build_loaders, train_fno
 
 # -------------------------- default hyper-parameters for datagen inferencing  --------------------------
-DEF_N_SAMPLES   = 100                   # trajectories per T (keep small => quick)
-DEF_N_EPOCHS    = 100                   # FNO training epochs
+DEF_N_SAMPLES   = 500                   # trajectories per T (keep small => quick)
+DEF_N_EPOCHS    = 200                   # FNO training epochs
 DEF_TRAIN_BS    = 32
 DEF_BATCH_SIZE  = 1                     # 1 = Stochastic, >1 = Batches
 DEF_ALPHA       = 1e-3                  # diffusion coefficient
 DEF_NX = DEF_NY = 32                    # spatial resolution
 DEF_DX = DEF_DY = 1.0 / (DEF_NX - 1)
 DEF_DT          = 0.01                  # physical timestep
-DEF_T_INTERVAL  = 250                    # total timesteps per frame
-HIDDEN_CHANNELS = 64
+DEF_T_INTERVAL  = 500                    # total timesteps per frame
+HIDDEN_CHANNELS = 128
 # -----------------------------------------------------------------------------
 
-# -------------------------- parameters for loading model(s) --------------------------
+# -------------------------- parameters for loading model(s) (inference) --------------------------
 # Select Model(s)
-DEF_T_MIN, DEF_T_MAX, DEF_T_STEP = 25, 150, 5 # Use timesteps between MIN and MAX (models)
+DEF_T_MIN, DEF_T_MAX, DEF_T_STEP = 25, 200, 5 # Use timesteps between MIN and MAX (models)
+DEF_MODEL_N = 250                               # Number of samples the model was trained on
 # ------------------------------------------------------------------------------
 
 # -------------------------- option for training --------------------------
@@ -265,7 +262,7 @@ def main(args):
                     hidden_channels=HIDDEN_CHANNELS, 
                     in_channels=1, out_channels=T).to(device)
         
-        ckpt_path = models_dir / f"T_{T}" / f"fno_T_{T}_samples_{args.samples}_epochs_{args.epochs}.pth"
+        ckpt_path = models_dir / f"T_{T}" / f"fno_T_{T}_samples_{DEF_MODEL_N}_epochs_{args.epochs}.pth"
 
         model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
         print(f"Loaded model -> {ckpt_path}")
@@ -288,7 +285,7 @@ def main(args):
         results[T].append(dict(T=T, dataset_sec=avg_t_data_gen, inference_sec=avg_t_inf, loss=avg_loss))
 
         # free up GPU memory
-        del train_dl, val_dl, test_dl, u0_tensor, uT_tensor
+        del model, train_dl, val_dl, test_dl, u0_tensor, uT_tensor
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect() # defragment the cache
@@ -296,7 +293,7 @@ def main(args):
         # Programming like it's C :D
         model = None
     
-    print(f"results: {results}")
+    # print(f"results: {results}")
 
     # ===== global timing plot csv =====
     # each models will have their own csv

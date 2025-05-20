@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import torch
 import os
@@ -63,14 +64,16 @@ def generate_initial_condition(nx, ny, mode='mixed'):
 def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='mixed', boundary='neumann-safe'):
     if u is None: # u is the initial conditions for the heat trajectory (frame 0)
         u = generate_initial_condition(nx, ny, mode=mode)
-        
+    
+    base, extra = divmod(nt, n_frames - 1)
     traj = [u.copy()] # Note: traj[0] is the initial frame of the trajectory
-    steps_per_frame = nt // (n_frames - 1)
+    step_counter = 0
     # add a small random constant to simulate some heat already in the system
     # u += np.random.rand(nx, ny) + 1
-    
-    for _ in range(1, n_frames):
-        for _ in range(steps_per_frame):
+
+    for frame in range(1, n_frames):
+        n_steps = base + (1 if frame <= extra else 0)
+        for _ in range(n_steps):
             lap = (
                 (np.roll(u, 1, axis=0) - 2*u + np.roll(u, -1, axis=0)) / dx**2 +
                 (np.roll(u, 1, axis=1) - 2*u + np.roll(u, -1, axis=1)) / dy**2
@@ -102,10 +105,11 @@ def generate_trajectory(nx, ny, dx, dy, dt, alpha, nt, n_frames, u=None, mode='m
                     u[-1, :] = 1.5
                     u[:, 0] = 0.0
                     u[:, -1] = np.max(u)
-            
+                    
+            step_counter += 1
 
         traj.append(u.copy())
-
+    assert step_counter == nt
     return traj[0], np.stack(traj)  # shape: (nx, ny), (T, nx, ny)
 
 # === Generate and save full dataset ===
