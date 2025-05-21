@@ -139,7 +139,7 @@ def plot_loss_test(results, save_dir=Path("."), samples=None):
     fig_path = save_dir / "test_loss_curve.png"
 
     # ---- collate mean loss per‑model -----------------------------------
-    Ts         = sorted(results.keys())
+    Ts = sorted(results.keys())
     avg_losses = [pd.DataFrame(results[T])["loss"].mean() for T in Ts]
 
     # ---- plotting ------------------------------------------------------
@@ -205,7 +205,7 @@ def plot_timing_all(results, save_dir=Path("."), samples=None):
     plt.grid(True, which="both", ls="--")
     plt.legend()
 
-    # crossover marker (first T where inference ≥ dataset)
+    # crossover marker (first T where inference >= dataset)
     for T, d, inf in zip(Ts, mean_dataset, mean_infer):
         if inf >= d:
             plt.axvline(T, color="grey", ls=":")

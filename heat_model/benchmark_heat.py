@@ -160,12 +160,24 @@ def plot_loss(train_hist=[], val_hist=[], save_dir=Path(".")):
 
 def plot_loss_test(results, save_dir=Path("."), samples=None):
     path = save_dir / "test_loss_curve.png"
+    
+    # ---- collect all distinct xy values across all models ----
+    xy_vals = set()
+    for rows in results.values():
+        xy_vals.update(pd.DataFrame(rows)['xy'].unique())
+    xy_vals = sorted(xy_vals)
+
     # ---- plot test loss history ----
     plt.figure(figsize=(12,9))
-    # TODO: Plot loss for all models in a for loop
+    
+    # vertical guidelines
+    plt.grid(True, which="both", ls="--")
+
+    # Plot loss for all models
     for res_model, rows in results.items():
         df = pd.DataFrame(rows)
         plt.plot(df['xy'], df['loss'],  label=f"model-{res_model}x{res_model}")
+    plt.xticks(ticks=xy_vals, rotation=45, ha='right')
     plt.yscale("log");  plt.xlabel("test set resolution");  plt.ylabel("Avg. MSE loss")
     plt.title(f"Mean Test Loss vs Test Set Resolution ({samples} samples)")
     plt.legend();   plt.tight_layout()
@@ -173,6 +185,45 @@ def plot_loss_test(results, save_dir=Path("."), samples=None):
     plt.close()
 
     print(f"Saved test loss curve plot to: {path}")
+
+
+def plot_infer_timing_all(results, save_dir=Path("."), samples=None):
+    path = save_dir / "test_inference_time_plot.png"
+    
+    # ---- collect all distinct xy values across all models ----
+    xy_vals = set()
+    for rows in results.values():
+        xy_vals.update(pd.DataFrame(rows)['xy'].unique())
+    xy_vals = sorted(xy_vals)
+
+    # ---- plot test loss history ----
+    plt.figure(figsize=(12,9))
+    
+    # vertical guidelines
+    plt.grid(True, which="both", ls="--")
+
+    explicit = False
+
+    # Plot loss for all models
+    for res_model, rows in results.items():
+        df = pd.DataFrame(rows)
+        # Plot inference for explicit euler-forward data generation
+        if not explicit:
+            plt.plot(df['xy'], df['dataset_sec'], label=f"Explicit Euler-forward method")
+            explicit = True
+
+        # Plot loss for current model
+        plt.plot(df['xy'], df['inference_sec'],  label=f"model-{res_model}x{res_model}")
+
+    plt.xticks(ticks=xy_vals, rotation=45, ha='right')
+    plt.yscale("log");  plt.xlabel("test set resolution");  plt.ylabel("Avg. Inference Time (sec)")
+    plt.title(f"Mean Inference Time vs Test Set Resolution ({samples} samples)")
+    plt.legend();   plt.tight_layout()
+    plt.savefig(path, dpi=200)
+    plt.close()
+
+    print(f"Saved test inference time plot to: {path}")
+
 
 def save_frames_and_gif(T, save_dir=Path("."), model=None, traj_true=None, traj_pred=None,
                              duration=0.08, cmap_name="inferno"):

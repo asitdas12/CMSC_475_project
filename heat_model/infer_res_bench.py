@@ -5,6 +5,7 @@
 import argparse, shutil
 from pathlib import Path
 from datetime import datetime
+import pickle
 
 import gc
 
@@ -14,13 +15,13 @@ import matplotlib.pyplot as plt
 
 from neuralop.models import FNO
 
-from benchmark_heat import torch_now, gen_dataset, inference_loop, build_loaders, timing_plot, plot_loss_test
+from benchmark_heat import torch_now, gen_dataset, inference_loop, build_loaders, timing_plot, plot_loss_test, plot_infer_timing_all
 
 # -------------------------- default hyper-parameters for datagen inferencing  --------------------------
 DEF_MIN_NXY, DEF_MAX_NXY, DEF_NXY_STEP = 4, 160, 4 # spatial resolution bounds for datagen
-DEF_T           = 250                    # T is how many frames for gt & inference
-DEF_N_SAMPLES   = 100                   # trajectories per T (keep small => quick)
-DEF_N_EPOCHS    = 100                   # FNO training epochs
+DEF_T           = 100                    # T is how many frames for gt & inference
+DEF_N_SAMPLES   = 250                   # trajectories per T (keep small => quick)
+DEF_N_EPOCHS    = 200                   # FNO training epochs
 DEF_BATCH_SIZE  = 1                     # 1 = Stochastic, >1 = Batches
 DEF_ALPHA       = 1e-3                  # diffusion coefficient
 DEF_DT          = 0.01                  # physical timestep
@@ -31,7 +32,7 @@ HIDDEN_CHANNELS = 128
 # -------------------------- parameters for loading model(s) --------------------------
 # Select Model(s)
 DEF_MIN_RES_MODEL, DEF_MAX_RES_MODEL, DEF_RES_STEP = 8, 64, 8 # spatial resolution bounds
-DEF_SAMPLES_MODEL   = 500 # Number of samples used to train the model
+DEF_SAMPLES_MODEL   = 250 # Number of samples used to train the model
 
 # ===== main ==================================================================
 
@@ -121,8 +122,12 @@ def main(args):
         df.to_csv(t_dir / f"dataset_timings_xy_{args.xy_min}_{args.xy_max}_{args.xy_step}.csv", index=False)
         
         timing_plot(df=df, samples=args.samples, dir=t_dir, res=res_model)
+
+    plot_infer_timing_all(results=results, save_dir=out_base, samples=args.samples)
     plot_loss_test(results=results, save_dir=out_base, samples=args.samples)
 
+    with open(out_base / 'results.pkl', 'wb') as file:
+        pickle.dump(results, file)
 
     print("All done!")
 
